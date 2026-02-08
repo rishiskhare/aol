@@ -840,7 +840,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
                 textDecoration: isUnderline ? 'underline' : 'none',
                 color: selectedColor || 'inherit',
                 fontFamily: selectedFont || 'inherit',
-                fontSize: selectedSize || 'inherit'
+                fontSize: selectedSize || '12px'
               }}
             />
             <button type="submit" className="win95-btn">Send</button>

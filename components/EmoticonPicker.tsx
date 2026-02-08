@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { emoticons, Emoticon } from '@/lib/emoticons'
 
 interface EmoticonPickerProps {
@@ -10,18 +10,25 @@ interface EmoticonPickerProps {
 
 export function EmoticonPicker({ onSelect, onClose }: EmoticonPickerProps) {
   const [hoveredEmoticon, setHoveredEmoticon] = useState<Emoticon | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [onClose])
 
   return (
-    <div className="absolute top-full left-0 mt-1 z-[100]">
+    <div className="absolute top-full left-0 mt-1 z-[100]" ref={ref}>
       <div className="win95-window p-2" style={{ width: '280px' }}>
         <div className="win95-titlebar mb-2">
           <span className="text-xs">Select a Smiley</span>
-          <button
-            className="win95-btn-titlebar"
-            onClick={onClose}
-          >
-            ×
-          </button>
         </div>
 
         <div

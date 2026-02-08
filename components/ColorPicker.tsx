@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useEffect } from 'react'
 import { messageColors } from '@/lib/formatting'
 
 interface ColorPickerProps {
@@ -9,14 +10,25 @@ interface ColorPickerProps {
 }
 
 export function ColorPicker({ onSelect, onClose, currentColor }: ColorPickerProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [onClose])
+
   return (
-    <div className="absolute top-full left-0 mt-1 z-[100]">
+    <div className="absolute top-full left-0 mt-1 z-[100]" ref={ref}>
       <div className="win95-window p-2" style={{ width: '160px' }}>
         <div className="win95-titlebar mb-2">
           <span className="text-xs">Text Color</span>
-          <button className="win95-btn-titlebar" onClick={onClose}>
-            ×
-          </button>
         </div>
 
         <div

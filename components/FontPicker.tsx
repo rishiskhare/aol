@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useEffect } from 'react'
 import { messageFonts } from '@/lib/formatting'
 
 interface FontPickerProps {
@@ -9,14 +10,25 @@ interface FontPickerProps {
 }
 
 export function FontPicker({ onSelect, onClose, currentFont }: FontPickerProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [onClose])
+
   return (
-    <div className="absolute top-full left-0 mt-1 z-[100]">
+    <div className="absolute top-full left-0 mt-1 z-[100]" ref={ref}>
       <div className="win95-window p-2" style={{ width: '180px' }}>
         <div className="win95-titlebar mb-2">
           <span className="text-xs">Font</span>
-          <button className="win95-btn-titlebar" onClick={onClose}>
-            ×
-          </button>
         </div>
 
         <div
@@ -26,9 +38,8 @@ export function FontPicker({ onSelect, onClose, currentFont }: FontPickerProps) 
           {messageFonts.map((font) => (
             <div
               key={font.name}
-              className={`px-2 py-1.5 cursor-pointer text-sm hover:bg-blue-100 ${
-                currentFont === font.value ? 'bg-[#000080] text-white' : ''
-              }`}
+              className={`px-2 py-1.5 cursor-pointer text-sm hover:bg-blue-100 ${currentFont === font.value ? 'bg-[#000080] text-white' : ''
+                }`}
               style={{ fontFamily: font.value || 'inherit' }}
               onClick={() => {
                 onSelect(font.value)
