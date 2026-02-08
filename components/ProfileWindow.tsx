@@ -54,6 +54,18 @@ export function ProfileWindow({ username, isOwnProfile, onClose }: ProfileWindow
       if (data) {
         setProfile(data)
         setEditForm(data)
+      } else {
+        // If no profile exists, create a default one locally
+        // It will be saved to DB when user clicks Save
+        const newProfile: Profile = {
+          ...defaultProfile,
+          username,
+          display_name: username,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+        setProfile(newProfile)
+        setEditForm(newProfile)
       }
       setIsLoading(false)
     }

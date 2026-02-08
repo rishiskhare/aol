@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS online_users (
   joined_at TIMESTAMPTZ DEFAULT NOW(),
   is_typing BOOLEAN DEFAULT FALSE,
   away_message TEXT DEFAULT NULL,
-  last_activity TIMESTAMPTZ DEFAULT NOW()
+  last_activity TIMESTAMPTZ DEFAULT NOW(),
+  current_room TEXT DEFAULT 'Town Square'
 );
 
 -- Private messages (IMs)

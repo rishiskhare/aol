@@ -262,8 +262,8 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             if (isDuplicate) {
               return prev.map((msg) =>
                 msg.id.startsWith('local-') &&
-                msg.username === newMsg.username &&
-                msg.content === newMsg.content
+                  msg.username === newMsg.username &&
+                  msg.content === newMsg.content
                   ? newMsg
                   : msg
               )
@@ -389,20 +389,11 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       }
     }
 
-    // Also try to delete on visibility change (more reliable on mobile)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        supabase.from('online_users').delete().eq('username', username)
-      }
-    }
-
     window.addEventListener('beforeunload', handleBeforeUnload)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       clearInterval(heartbeatInterval)
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
       // Cleanup on unmount
       supabase.from('online_users').delete().eq('username', username)
     }
@@ -607,11 +598,11 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     const inRoom = (u.current_room || 'Town Square') === currentRoom
     if (!inRoom) return false
 
-    // Check if user is active (last_activity within 60 seconds)
+    // Check if user is active (last_activity within 5 minutes to account for clock skew)
     if (u.last_activity) {
       const lastActivity = new Date(u.last_activity).getTime()
       const now = Date.now()
-      const isActive = (now - lastActivity) < 60000 // 60 seconds
+      const isActive = (now - lastActivity) < 300000 // 5 minutes
       return isActive
     }
 
@@ -619,7 +610,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     if (u.joined_at) {
       const joinedAt = new Date(u.joined_at).getTime()
       const now = Date.now()
-      return (now - joinedAt) < 60000
+      return (now - joinedAt) < 300000 // 5 minutes
     }
 
     return true
@@ -877,9 +868,8 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             {usersInRoom.map((user) => (
               <div
                 key={user.username}
-                className={`flex items-center gap-2 p-1 cursor-pointer hover:bg-blue-100 ${
-                  user.username === username ? 'bg-blue-50' : ''
-                } ${isBlocked(user.username) ? 'opacity-50' : ''}`}
+                className={`flex items-center gap-2 p-1 cursor-pointer hover:bg-blue-100 ${user.username === username ? 'bg-blue-50' : ''
+                  } ${isBlocked(user.username) ? 'opacity-50' : ''}`}
                 onDoubleClick={() => openIM(user.username)}
                 onContextMenu={(e) => {
                   e.preventDefault()
