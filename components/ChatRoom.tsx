@@ -81,6 +81,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const previousUsersRef = useRef<Set<string>>(new Set())
+  const joinTimeRef = useRef<string>(new Date().toISOString())
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -101,23 +102,20 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
 
       if (!isSupabaseConfigured()) {
         setIsDemoMode(true)
-        setMessages(demoMessages)
+        // In demo mode, start with empty messages (user just joined)
+        setMessages([])
         setOnlineUsers([...demoUsers, { username, joined_at: new Date().toISOString() }])
         previousUsersRef.current = new Set(demoUsers.map(u => u.username))
         setIsLoading(false)
         return
       }
 
-      // Fetch messages
-      const { data: messagesData } = await supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .limit(100)
+      // Record join time
+      const joinTime = new Date().toISOString()
+      joinTimeRef.current = joinTime
 
-      if (messagesData) {
-        setMessages(messagesData)
-      }
+      // Don't fetch old messages - users only see messages from when they joined
+      setMessages([])
 
       // Fetch online users
       const { data: usersData } = await supabase
@@ -130,16 +128,8 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         previousUsersRef.current = new Set(usersData.map((u: User) => u.username))
       }
 
-      // Fetch recent system events
-      const { data: eventsData } = await supabase
-        .from('system_events')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .limit(20)
-
-      if (eventsData) {
-        setSystemEvents(eventsData)
-      }
+      // Don't fetch old system events - start fresh
+      setSystemEvents([])
 
       setIsLoading(false)
     }
