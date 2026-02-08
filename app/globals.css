@@ -1,26 +1,362 @@
 @import "tailwindcss";
 
+/* Retro AOL / Windows 95 Color Palette */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --win95-bg: #c0c0c0;
+  --win95-dark: #808080;
+  --win95-darker: #404040;
+  --win95-light: #dfdfdf;
+  --win95-lighter: #ffffff;
+  --win95-blue: #000080;
+  --win95-blue-gradient-start: #000080;
+  --win95-blue-gradient-end: #1084d0;
+  --aol-yellow: #ffff00;
+  --aol-cream: #ffffcc;
+  --chat-bg: #ffffff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-win95-bg: var(--win95-bg);
+  --color-win95-dark: var(--win95-dark);
+  --color-win95-light: var(--win95-light);
+  --color-win95-blue: var(--win95-blue);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #008080;
+  font-family: 'MS Sans Serif', 'Segoe UI', Tahoma, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  image-rendering: pixelated;
+}
+
+/* Windows 95 Style 3D Borders */
+.win95-border-outset {
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+}
+
+.win95-border-inset {
+  border: 2px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+}
+
+.win95-border-outset-thin {
+  border: 1px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+}
+
+.win95-border-inset-thin {
+  border: 1px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+}
+
+/* Windows 95 Window */
+.win95-window {
+  background: var(--win95-bg);
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+  box-shadow:
+    inset 1px 1px 0 var(--win95-light),
+    inset -1px -1px 0 var(--win95-dark);
+}
+
+/* Title Bar */
+.win95-titlebar {
+  background: linear-gradient(90deg, var(--win95-blue-gradient-start) 0%, var(--win95-blue-gradient-end) 100%);
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  padding: 3px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.win95-titlebar-inactive {
+  background: linear-gradient(90deg, #808080 0%, #c0c0c0 100%);
+}
+
+/* Title Bar Buttons */
+.win95-btn-titlebar {
+  width: 16px;
+  height: 14px;
+  background: var(--win95-bg);
+  border: 1px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  font-family: 'Marlett', sans-serif;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.win95-btn-titlebar:active {
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+}
+
+/* Windows 95 Button */
+.win95-btn {
+  background: var(--win95-bg);
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+  box-shadow:
+    inset 1px 1px 0 var(--win95-light),
+    inset -1px -1px 0 var(--win95-dark);
+  padding: 4px 16px;
+  font-family: 'MS Sans Serif', 'Segoe UI', Tahoma, sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 75px;
+}
+
+.win95-btn:active {
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+  box-shadow:
+    inset -1px -1px 0 var(--win95-light),
+    inset 1px 1px 0 var(--win95-dark);
+  padding: 5px 15px 3px 17px;
+}
+
+.win95-btn:focus {
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+
+/* Windows 95 Input */
+.win95-input {
+  background: white;
+  border: 2px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+  box-shadow:
+    inset 1px 1px 0 var(--win95-dark);
+  padding: 4px 6px;
+  font-family: 'MS Sans Serif', 'Segoe UI', Tahoma, sans-serif;
+  font-size: 11px;
+}
+
+.win95-input:focus {
+  outline: none;
+}
+
+/* Chat Area */
+.chat-messages {
+  background: white;
+  border: 2px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+  box-shadow: inset 1px 1px 0 var(--win95-dark);
+  overflow-y: auto;
+  font-family: 'MS Sans Serif', 'Segoe UI', Tahoma, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 16px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: var(--win95-bg);
+  border: 1px solid var(--win95-dark);
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--win95-bg);
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+}
+
+.chat-messages::-webkit-scrollbar-button {
+  background: var(--win95-bg);
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+  height: 16px;
+}
+
+/* User List */
+.user-list {
+  background: white;
+  border: 2px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+  box-shadow: inset 1px 1px 0 var(--win95-dark);
+  overflow-y: auto;
+  font-family: 'MS Sans Serif', 'Segoe UI', Tahoma, sans-serif;
+  font-size: 11px;
+}
+
+.user-list::-webkit-scrollbar {
+  width: 16px;
+}
+
+.user-list::-webkit-scrollbar-track {
+  background: var(--win95-bg);
+}
+
+.user-list::-webkit-scrollbar-thumb {
+  background: var(--win95-bg);
+  border: 2px solid;
+  border-color: var(--win95-lighter) var(--win95-darker) var(--win95-darker) var(--win95-lighter);
+}
+
+/* Menu Bar */
+.win95-menubar {
+  background: var(--win95-bg);
+  border-bottom: 1px solid var(--win95-dark);
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.win95-menubar-item {
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.win95-menubar-item:hover {
+  background: var(--win95-blue);
+  color: white;
+}
+
+/* Status Bar */
+.win95-statusbar {
+  background: var(--win95-bg);
+  border-top: 1px solid var(--win95-lighter);
+  padding: 2px 4px;
+  font-size: 11px;
+  display: flex;
+  gap: 4px;
+}
+
+.win95-statusbar-section {
+  border: 1px solid;
+  border-color: var(--win95-darker) var(--win95-lighter) var(--win95-lighter) var(--win95-darker);
+  padding: 1px 4px;
+  flex: 1;
+}
+
+/* AOL Specific Styles */
+.aol-header {
+  background: linear-gradient(180deg, #4a7dc7 0%, #2d5aa0 100%);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aol-logo {
+  color: white;
+  font-weight: bold;
+  font-size: 14px;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+/* Buddy Icon */
+.buddy-icon {
+  width: 24px;
+  height: 24px;
+  background: #ffcc00;
+  border: 1px solid #cc9900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+/* Message Colors */
+.username-color-1 { color: #0000ff; }
+.username-color-2 { color: #ff0000; }
+.username-color-3 { color: #008000; }
+.username-color-4 { color: #ff00ff; }
+.username-color-5 { color: #008080; }
+.username-color-6 { color: #800000; }
+.username-color-7 { color: #ff8000; }
+.username-color-8 { color: #800080; }
+
+/* Login Dialog */
+.login-dialog {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+/* Animations */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: blink 1s infinite;
+}
+
+/* AOL Welcome Sound Effect Icon */
+.aol-sound-icon {
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* Field Labels */
+.field-label {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+/* Groupbox */
+.win95-groupbox {
+  border: 1px solid var(--win95-dark);
+  border-color: var(--win95-dark) var(--win95-lighter) var(--win95-lighter) var(--win95-dark);
+  padding: 12px 8px 8px;
+  margin: 8px 0;
+  position: relative;
+}
+
+.win95-groupbox-title {
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  background: var(--win95-bg);
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+/* Separator */
+.win95-separator {
+  height: 2px;
+  background: var(--win95-dark);
+  border-bottom: 1px solid var(--win95-lighter);
+  margin: 8px 0;
+}
+
+/* Door sound notification */
+.door-notification {
+  color: #666;
+  font-style: italic;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* System message */
+.system-message {
+  color: #666;
+  font-size: 11px;
+  padding: 2px 8px;
+  text-align: center;
+  background: #f0f0f0;
+  border-top: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  margin: 4px 0;
 }

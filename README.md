@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AOL Chat - A Retro Instant Messenger Experience
 
-## Getting Started
+A nostalgic recreation of the classic AOL Instant Messenger chat experience, built with Next.js and Supabase for real-time messaging.
 
-First, run the development server:
+```
+   _____ _____ __
+  |  _  |     |  |
+  |     |  |  |  |__
+  |__|__|_____|_____|
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+  You've Got Mail!
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Authentic Windows 95/98 UI styling
+- Classic AOL chat room experience
+- Real-time messaging with Supabase
+- Online users list ("People Here")
+- Nostalgic "You've Got Mail!" welcome screen
+- Demo mode for testing without Supabase
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Quick Start
 
-## Learn More
+```bash
+# Install dependencies
+npm install
 
-To learn more about Next.js, take a look at the following resources:
+# Start development server
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The app runs in **demo mode** without Supabase configuration - you can test the UI immediately!
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Supabase Setup (For Real-time Chat)
 
-## Deploy on Vercel
+1. Create a free project at [supabase.com](https://supabase.com)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+2. Run the SQL schema in `supabase/schema.sql`:
+   - Go to Dashboard > SQL Editor > New Query
+   - Paste the contents of `supabase/schema.sql`
+   - Click "Run"
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+3. Enable Realtime:
+   - Go to Dashboard > Database > Replication
+   - Enable replication for `messages` and `online_users` tables
+
+4. Get your API credentials:
+   - Go to Dashboard > Settings > API
+   - Copy your Project URL and anon/public key
+
+5. Create `.env.local`:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+6. Add your credentials to `.env.local`:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   ```
+
+7. Restart the dev server
+
+## Tech Stack
+
+- **Frontend**: Next.js 16, React 19, TypeScript
+- **Styling**: Tailwind CSS 4 (Windows 95/AOL theme)
+- **Backend**: Supabase (PostgreSQL + Realtime)
+- **Deployment**: Vercel-ready
+
+## Project Structure
+
+```
+aol/
+├── app/
+│   ├── globals.css      # Windows 95 theme styles
+│   ├── layout.tsx       # Root layout
+│   └── page.tsx         # Main page
+├── components/
+│   ├── AOLWindow.tsx    # Windows 95 window component
+│   ├── ChatRoom.tsx     # Main chat interface
+│   ├── LoginDialog.tsx  # Sign-on dialog
+│   └── WelcomeScreen.tsx # "You've Got Mail" screen
+├── lib/
+│   └── supabase.ts      # Supabase client
+└── supabase/
+    └── schema.sql       # Database schema
+```
+
+## Classic AOL Phrases
+
+- a/s/l? (age/sex/location)
+- brb (be right back)
+- ttyl (talk to you later)
+- lol (laughing out loud)
+- g2g (got to go)
+- kk (okay)
+
+---
+
+*Remember: Don't give out your password to anyone, even if they say they work for AOL!*
