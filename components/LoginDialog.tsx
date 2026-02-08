@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AOLWindow } from './AOLWindow'
 
 interface LoginDialogProps {
@@ -10,10 +10,51 @@ interface LoginDialogProps {
 export function LoginDialog({ onLogin }: LoginDialogProps) {
   const [username, setUsername] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isVerified, setIsVerified] = useState(false)
+  const [verificationError, setVerificationError] = useState(false)
+  const [widgetReady, setWidgetReady] = useState(false)
+  const widgetContainerRef = useRef<HTMLDivElement>(null)
+
+  // Load ALTCHA widget
+  useEffect(() => {
+    // Dynamically import altcha to avoid SSR issues
+    import('altcha')
+      .then(() => setWidgetReady(true))
+      .catch(console.error)
+  }, [])
+
+  // Listen for ALTCHA state changes
+  useEffect(() => {
+    if (!widgetReady || !widgetContainerRef.current) return
+
+    const container = widgetContainerRef.current
+    const widget = container.querySelector('altcha-widget')
+    if (!widget) return
+
+    const handleStateChange = (event: Event) => {
+      const customEvent = event as CustomEvent
+      const { state } = customEvent.detail || {}
+
+      if (state === 'verified') {
+        setIsVerified(true)
+        setVerificationError(false)
+      } else if (state === 'error') {
+        setVerificationError(true)
+        setIsVerified(false)
+      } else if (state === 'unverified') {
+        setIsVerified(false)
+      }
+    }
+
+    widget.addEventListener('statechange', handleStateChange)
+    return () => {
+      widget.removeEventListener('statechange', handleStateChange)
+    }
+  }, [widgetReady])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!username.trim()) return
+    if (!username.trim() || !isVerified) return
 
     setIsConnecting(true)
 
@@ -88,11 +129,34 @@ export function LoginDialog({ onLogin }: LoginDialogProps) {
                 <label htmlFor="savePassword" className="text-xs">Save password</label>
               </div>
 
+              {/* ALTCHA Human Verification */}
+              <div className="mb-4" ref={widgetContainerRef}>
+                <div className="text-xs font-bold mb-1" style={{ color: '#000080' }}>
+                  Human Verification
+                </div>
+                {widgetReady && (
+                  <altcha-widget
+                    challengeurl="/api/altcha"
+                    style={{
+                      '--altcha-max-width': '100%',
+                    }}
+                  />
+                )}
+                {!widgetReady && (
+                  <div className="text-xs text-gray-500">Loading verification...</div>
+                )}
+                {verificationError && (
+                  <div className="text-xs text-red-600 mt-1">
+                    Verification failed. Please try again.
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-center gap-2">
                 <button
                   type="submit"
                   className="win95-btn"
-                  disabled={!username.trim()}
+                  disabled={!username.trim() || !isVerified}
                 >
                   Sign On
                 </button>
