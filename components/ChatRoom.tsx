@@ -697,13 +697,20 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
           </div>
           <div className="relative">
             <button
-              className="win95-btn p-1 min-w-0"
+              className="win95-btn p-1 min-w-0 text-left"
               title="Font"
-              style={{ padding: '2px 6px', fontSize: '10px', fontFamily: selectedFont || 'inherit' }}
+              style={{
+                padding: '2px 6px',
+                fontFamily: selectedFont || 'inherit',
+                width: '120px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}
               onClick={() => setShowFontPicker(!showFontPicker)}
               type="button"
             >
-              {selectedFont ? messageFonts.find(f => f.value === selectedFont)?.name.slice(0, 3) || 'Aa' : 'Aa'}
+              {selectedFont ? messageFonts.find(f => f.value === selectedFont)?.name || 'Aa' : 'Aa'}
             </button>
             {showFontPicker && (
               <FontPicker
@@ -717,11 +724,11 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             <button
               className="win95-btn p-1 min-w-0"
               title="Font Size"
-              style={{ padding: '2px 6px', fontSize: '10px' }}
+              style={{ padding: '2px 6px' }}
               onClick={() => setShowSizePicker(!showSizePicker)}
               type="button"
             >
-              {selectedSize ? messageSizes.find(s => s.value === selectedSize)?.name.slice(0, 2) || '14' : '14'}
+              {selectedSize ? messageSizes.find(s => s.value === selectedSize)?.name || 'Normal' : 'Normal'}
             </button>
             {showSizePicker && (
               <SizePicker
