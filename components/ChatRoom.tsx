@@ -228,22 +228,9 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       )
       .subscribe()
 
-    const eventsChannel = supabase
-      .channel('system_events')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'system_events' },
-        (payload) => {
-          const event = payload.new as SystemEvent
-          setSystemEvents((prev) => [...prev, event])
-        }
-      )
-      .subscribe()
-
     return () => {
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
-      supabase.removeChannel(eventsChannel)
     }
   }, [username, soundEnabled])
 
@@ -255,24 +242,12 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       await supabase
         .from('online_users')
         .upsert({ username, is_typing: false, away_message: null }, { onConflict: 'username' })
-
-      // Post join event
-      await supabase.from('system_events').insert({
-        event_type: 'join',
-        username,
-        message: `${username} has entered the room.`
-      })
     }
 
     registerUser()
 
-    // Cleanup: remove user and post leave event
+    // Cleanup: remove user when leaving
     const handleBeforeUnload = async () => {
-      await supabase.from('system_events').insert({
-        event_type: 'leave',
-        username,
-        message: `${username} has left the room.`
-      })
       await supabase.from('online_users').delete().eq('username', username)
     }
 
@@ -360,30 +335,11 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         .from('online_users')
         .update({ away_message: message })
         .eq('username', username)
-
-      if (message) {
-        await supabase.from('system_events').insert({
-          event_type: 'away',
-          username,
-          message: `${username} is now away: ${message}`
-        })
-      } else {
-        await supabase.from('system_events').insert({
-          event_type: 'back',
-          username,
-          message: `${username} is back.`
-        })
-      }
     }
   }
 
   const handleSignOut = async () => {
     if (isSupabaseConfigured()) {
-      await supabase.from('system_events').insert({
-        event_type: 'leave',
-        username,
-        message: `${username} has left the room.`
-      })
       await supabase.from('online_users').delete().eq('username', username)
     }
     onSignOut()
