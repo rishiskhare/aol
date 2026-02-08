@@ -56,6 +56,7 @@ export type User = {
   is_typing?: boolean
   away_message?: string | null
   last_activity?: string
+  current_room?: string
 }
 
 export type PrivateMessage = {

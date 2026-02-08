@@ -12,8 +12,8 @@ export function EmoticonPicker({ onSelect, onClose }: EmoticonPickerProps) {
   const [hoveredEmoticon, setHoveredEmoticon] = useState<Emoticon | null>(null)
 
   return (
-    <div className="absolute bottom-full left-0 mb-1 z-50">
-      <div className="win95-window p-2" style={{ width: '240px' }}>
+    <div className="absolute top-full left-0 mt-1 z-[100]">
+      <div className="win95-window p-2" style={{ width: '280px' }}>
         <div className="win95-titlebar mb-2">
           <span className="text-xs">Select a Smiley</span>
           <button
@@ -34,7 +34,7 @@ export function EmoticonPicker({ onSelect, onClose }: EmoticonPickerProps) {
           {emoticons.map((emoticon) => (
             <button
               key={emoticon.shortcut}
-              className="w-6 h-6 flex items-center justify-center hover:bg-blue-100 rounded cursor-pointer text-base"
+              className="w-7 h-7 flex items-center justify-center hover:bg-blue-100 hover:scale-125 rounded cursor-pointer text-lg transition-transform"
               onClick={() => {
                 onSelect(emoticon.emoji)
                 onClose()
@@ -49,11 +49,11 @@ export function EmoticonPicker({ onSelect, onClose }: EmoticonPickerProps) {
           ))}
         </div>
 
-        <div className="mt-2 text-xs text-gray-600 h-4">
+        <div className="mt-2 text-xs text-gray-600 h-4 text-center">
           {hoveredEmoticon ? (
-            <span>{hoveredEmoticon.description} - type {hoveredEmoticon.shortcut}</span>
+            <span><strong>{hoveredEmoticon.emoji}</strong> {hoveredEmoticon.description} - type <code className="bg-gray-100 px-1">{hoveredEmoticon.shortcut}</code></span>
           ) : (
-            <span>Click an emoticon to insert</span>
+            <span>Hover to preview, click to insert</span>
           )}
         </div>
       </div>

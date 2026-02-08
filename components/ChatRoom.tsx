@@ -8,14 +8,30 @@ import { ColorPicker } from './ColorPicker'
 import { IMWindow } from './IMWindow'
 import { ProfileWindow } from './ProfileWindow'
 import { AwayMessageDialog } from './AwayMessageDialog'
+import { BuddyListWindow } from './BuddyListWindow'
+import { RoomListWindow } from './RoomListWindow'
+import { WarnBlockDialog } from './WarnBlockDialog'
 import { parseEmoticons } from '@/lib/emoticons'
-import { parseFormatting, FormattedSegment, wrapWithTag } from '@/lib/formatting'
+import { parseFormatting, FormattedSegment, wrapWithTag, messageFonts, messageSizes } from '@/lib/formatting'
+import { FontPicker } from './FontPicker'
+import { SizePicker } from './SizePicker'
 import {
   playDoorOpen,
   playDoorClose,
   playIMReceived,
   initAudio
 } from '@/lib/sounds'
+
+// Types for warn/block system
+interface BlockedUser {
+  username: string
+  blockedAt: string
+}
+
+interface UserWarning {
+  username: string
+  level: number
+}
 
 interface ChatRoomProps {
   username: string
@@ -65,7 +81,11 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
   // UI state
   const [showEmoticonPicker, setShowEmoticonPicker] = useState(false)
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const [showFontPicker, setShowFontPicker] = useState(false)
+  const [showSizePicker, setShowSizePicker] = useState(false)
   const [selectedColor, setSelectedColor] = useState<string | null>(null)
+  const [selectedFont, setSelectedFont] = useState<string>('')
+  const [selectedSize, setSelectedSize] = useState<string>('')
   const [isBold, setIsBold] = useState(false)
   const [isItalic, setIsItalic] = useState(false)
   const [isUnderline, setIsUnderline] = useState(false)
@@ -77,14 +97,77 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
   const [awayMessage, setAwayMessage] = useState<string | null>(null)
   const [typingUsers, setTypingUsers] = useState<string[]>([])
 
+  // New features
+  const [currentRoom, setCurrentRoom] = useState('Town Square')
+  const [showBuddyList, setShowBuddyList] = useState(false)
+  const [showRoomList, setShowRoomList] = useState(false)
+  const [showWarnBlock, setShowWarnBlock] = useState<string | null>(null)
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([])
+  const [userWarnings, setUserWarnings] = useState<UserWarning[]>([])
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const previousUsersRef = useRef<Set<string>>(new Set())
+  const previousRoomUsersRef = useRef<Set<string>>(new Set())
   const joinTimeRef = useRef<string>(new Date().toISOString())
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  // Load blocked users and warnings from localStorage
+  useEffect(() => {
+    const savedBlocked = localStorage.getItem(`aol_blocked_${username}`)
+    if (savedBlocked) {
+      try { setBlockedUsers(JSON.parse(savedBlocked)) } catch { /* ignore */ }
+    }
+    const savedWarnings = localStorage.getItem('aol_warnings')
+    if (savedWarnings) {
+      try { setUserWarnings(JSON.parse(savedWarnings)) } catch { /* ignore */ }
+    }
+  }, [username])
+
+  // Save blocked users to localStorage
+  useEffect(() => {
+    localStorage.setItem(`aol_blocked_${username}`, JSON.stringify(blockedUsers))
+  }, [blockedUsers, username])
+
+  // Save warnings to localStorage
+  useEffect(() => {
+    localStorage.setItem('aol_warnings', JSON.stringify(userWarnings))
+  }, [userWarnings])
+
+  // Helper functions for warn/block
+  const isBlocked = useCallback((targetUsername: string) => {
+    return blockedUsers.some(b => b.username === targetUsername)
+  }, [blockedUsers])
+
+  const getWarningLevel = useCallback((targetUsername: string) => {
+    return userWarnings.find(w => w.username === targetUsername)?.level || 0
+  }, [userWarnings])
+
+  const warnUser = useCallback((targetUsername: string) => {
+    setUserWarnings(prev => {
+      const existing = prev.find(w => w.username === targetUsername)
+      if (existing) {
+        return prev.map(w =>
+          w.username === targetUsername
+            ? { ...w, level: Math.min(100, w.level + 20) }
+            : w
+        )
+      }
+      return [...prev, { username: targetUsername, level: 20 }]
+    })
+  }, [])
+
+  const blockUser = useCallback((targetUsername: string) => {
+    if (!blockedUsers.some(b => b.username === targetUsername)) {
+      setBlockedUsers(prev => [...prev, { username: targetUsername, blockedAt: new Date().toISOString() }])
+    }
+  }, [blockedUsers])
+
+  const unblockUser = useCallback((targetUsername: string) => {
+    setBlockedUsers(prev => prev.filter(b => b.username !== targetUsername))
   }, [])
 
   // Initialize audio on first interaction
@@ -105,7 +188,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         // In demo mode, start with empty messages (user just joined)
         setMessages([])
         setOnlineUsers([...demoUsers, { username, joined_at: new Date().toISOString() }])
-        previousUsersRef.current = new Set(demoUsers.map(u => u.username))
+        previousRoomUsersRef.current = new Set(demoUsers.map(u => u.username))
         setIsLoading(false)
         return
       }
@@ -117,6 +200,13 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       // Don't fetch old messages - users only see messages from when they joined
       setMessages([])
 
+      // Clean up stale users (no activity in last 2 minutes)
+      const twoMinutesAgo = new Date(Date.now() - 120000).toISOString()
+      await supabase
+        .from('online_users')
+        .delete()
+        .lt('last_activity', twoMinutesAgo)
+
       // Fetch online users
       const { data: usersData } = await supabase
         .from('online_users')
@@ -124,8 +214,18 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         .order('joined_at', { ascending: true })
 
       if (usersData) {
-        setOnlineUsers(usersData)
-        previousUsersRef.current = new Set(usersData.map((u: User) => u.username))
+        // Filter to only active users (activity in last 60 seconds)
+        const activeUsers = usersData.filter((u: User) => {
+          if (u.last_activity) {
+            const lastActivity = new Date(u.last_activity).getTime()
+            return (Date.now() - lastActivity) < 60000
+          }
+          return true
+        })
+        setOnlineUsers(activeUsers)
+        // Track users in the current room
+        const roomUsers = activeUsers.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
+        previousRoomUsersRef.current = new Set(roomUsers.map((u: User) => u.username))
       }
 
       // Don't fetch old system events - start fresh
@@ -148,6 +248,9 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message
+          // Filter blocked users
+          if (isBlocked(newMsg.username)) return
+
           setMessages((prev) => {
             const isDuplicate = prev.some(
               (msg) =>
@@ -180,23 +283,34 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'online_users' },
-        async (payload) => {
+        async () => {
           const { data } = await supabase
             .from('online_users')
             .select('*')
             .order('joined_at', { ascending: true })
 
           if (data) {
-            const newUsernames = new Set(data.map((u: User) => u.username))
-            const oldUsernames = previousUsersRef.current
+            // Filter to only active users (activity in last 60 seconds)
+            const activeUsers = data.filter((u: User) => {
+              if (u.last_activity) {
+                const lastActivity = new Date(u.last_activity).getTime()
+                return (Date.now() - lastActivity) < 60000
+              }
+              return true
+            })
+            setOnlineUsers(activeUsers)
 
-            // Check for new users (door open)
-            for (const u of data) {
-              if (!oldUsernames.has(u.username) && u.username !== username) {
+            // Filter to users in current room
+            const roomUsers = activeUsers.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
+            const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
+            const oldRoomUsernames = previousRoomUsersRef.current
+
+            // Check for users who joined this room (door open)
+            for (const u of roomUsers) {
+              if (!oldRoomUsernames.has(u.username) && u.username !== username) {
                 if (soundEnabled) playDoorOpen()
-                // Add join event locally
                 setSystemEvents((prev) => [...prev, {
-                  id: `local-${Date.now()}`,
+                  id: `local-${Date.now()}-${u.username}`,
                   event_type: 'join' as const,
                   username: u.username,
                   created_at: new Date().toISOString()
@@ -204,12 +318,12 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
               }
             }
 
-            // Check for users who left (door close)
-            for (const oldUser of oldUsernames) {
-              if (!newUsernames.has(oldUser) && oldUser !== username) {
+            // Check for users who left this room (door close)
+            for (const oldUser of oldRoomUsernames) {
+              if (!newRoomUsernames.has(oldUser) && oldUser !== username) {
                 if (soundEnabled) playDoorClose()
                 setSystemEvents((prev) => [...prev, {
-                  id: `local-${Date.now()}`,
+                  id: `local-${Date.now()}-${oldUser}`,
                   event_type: 'leave' as const,
                   username: oldUser,
                   created_at: new Date().toISOString()
@@ -217,11 +331,10 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
               }
             }
 
-            previousUsersRef.current = newUsernames
-            setOnlineUsers(data)
+            previousRoomUsersRef.current = newRoomUsernames
 
-            // Update typing users
-            const typing = data.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
+            // Update typing users (only in current room)
+            const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
             setTypingUsers(typing)
           }
         }
@@ -232,32 +345,68 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
     }
-  }, [username, soundEnabled])
+  }, [username, soundEnabled, isBlocked, currentRoom])
 
-  // Register user as online
+  // Register user as online with heartbeat
   useEffect(() => {
     if (!isSupabaseConfigured()) return
+
+    const now = new Date().toISOString()
 
     const registerUser = async () => {
       await supabase
         .from('online_users')
-        .upsert({ username, is_typing: false, away_message: null }, { onConflict: 'username' })
+        .upsert({
+          username,
+          is_typing: false,
+          away_message: null,
+          current_room: currentRoom,
+          last_activity: now,
+          joined_at: now
+        }, { onConflict: 'username' })
     }
 
     registerUser()
 
+    // Heartbeat: update last_activity every 30 seconds
+    const heartbeatInterval = setInterval(async () => {
+      await supabase
+        .from('online_users')
+        .update({ last_activity: new Date().toISOString() })
+        .eq('username', username)
+    }, 30000)
+
     // Cleanup: remove user when leaving
-    const handleBeforeUnload = async () => {
-      await supabase.from('online_users').delete().eq('username', username)
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable cleanup (doesn't wait for response)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLIC_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      if (supabaseUrl && supabaseKey) {
+        navigator.sendBeacon(
+          `${supabaseUrl}/rest/v1/online_users?username=eq.${encodeURIComponent(username)}`,
+          JSON.stringify({})
+        )
+      }
+    }
+
+    // Also try to delete on visibility change (more reliable on mobile)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        supabase.from('online_users').delete().eq('username', username)
+      }
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
+      clearInterval(heartbeatInterval)
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      handleBeforeUnload()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      // Cleanup on unmount
+      supabase.from('online_users').delete().eq('username', username)
     }
-  }, [username])
+  }, [username, currentRoom])
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -296,6 +445,8 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     if (isItalic) messageContent = wrapWithTag(messageContent, 'i')
     if (isUnderline) messageContent = wrapWithTag(messageContent, 'u')
     if (selectedColor) messageContent = wrapWithTag(messageContent, 'color', selectedColor)
+    if (selectedFont) messageContent = wrapWithTag(messageContent, 'font', selectedFont)
+    if (selectedSize) messageContent = wrapWithTag(messageContent, 'size', selectedSize)
 
     setNewMessage('')
 
@@ -345,6 +496,38 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     onSignOut()
   }
 
+  const handleJoinRoom = async (roomName: string) => {
+    if (roomName === currentRoom) {
+      setShowRoomList(false)
+      return
+    }
+
+    // Clear messages and events when switching rooms
+    setMessages([])
+    setSystemEvents([])
+    previousRoomUsersRef.current = new Set()
+    setCurrentRoom(roomName)
+    setShowRoomList(false)
+
+    // Update current room in database
+    if (isSupabaseConfigured()) {
+      await supabase
+        .from('online_users')
+        .update({ current_room: roomName })
+        .eq('username', username)
+
+      // Fetch users in the new room
+      const { data } = await supabase
+        .from('online_users')
+        .select('*')
+        .eq('current_room', roomName)
+
+      if (data) {
+        previousRoomUsersRef.current = new Set(data.map((u: User) => u.username))
+      }
+    }
+  }
+
   const openIM = (targetUser: string) => {
     if (targetUser === username) return
     if (openIMs.find(im => im.username === targetUser)) return
@@ -380,32 +563,79 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     const withEmoticons = parseEmoticons(text)
     const segments = parseFormatting(withEmoticons)
 
-    return segments.map((segment: FormattedSegment, i: number) => (
-      <span
-        key={i}
-        style={{
-          fontWeight: segment.bold ? 'bold' : 'normal',
-          fontStyle: segment.italic ? 'italic' : 'normal',
-          textDecoration: segment.underline ? 'underline' : 'none',
-          color: segment.color || 'inherit'
-        }}
-      >
-        {segment.text}
-      </span>
-    ))
+    return segments.map((segment: FormattedSegment, i: number) => {
+      const style: React.CSSProperties = {
+        fontWeight: segment.bold ? 'bold' : 'normal',
+        fontStyle: segment.italic ? 'italic' : 'normal',
+        textDecoration: segment.underline ? 'underline' : 'none',
+        color: segment.color || 'inherit',
+        fontFamily: segment.font || 'inherit',
+        fontSize: segment.size || 'inherit'
+      }
+
+      // Render as link if it's a URL
+      if (segment.isLink && segment.url) {
+        return (
+          <a
+            key={i}
+            href={segment.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              ...style,
+              color: segment.color || '#0000ff',
+              textDecoration: 'underline',
+              cursor: 'pointer'
+            }}
+            className="hover:text-blue-800"
+          >
+            {segment.text}
+          </a>
+        )
+      }
+
+      return (
+        <span key={i} style={style}>
+          {segment.text}
+        </span>
+      )
+    })
   }
 
-  // Combine messages and events for timeline
+  // Filter users to current room only, and only show active users (activity in last 60 seconds)
+  const usersInRoom = onlineUsers.filter(u => {
+    const inRoom = (u.current_room || 'Town Square') === currentRoom
+    if (!inRoom) return false
+
+    // Check if user is active (last_activity within 60 seconds)
+    if (u.last_activity) {
+      const lastActivity = new Date(u.last_activity).getTime()
+      const now = Date.now()
+      const isActive = (now - lastActivity) < 60000 // 60 seconds
+      return isActive
+    }
+
+    // If no last_activity, check joined_at (for backwards compatibility)
+    if (u.joined_at) {
+      const joinedAt = new Date(u.joined_at).getTime()
+      const now = Date.now()
+      return (now - joinedAt) < 60000
+    }
+
+    return true
+  })
+
+  // Combine messages and events for timeline, filtering blocked users
   const chatItems: ChatItem[] = [
-    ...messages.map((m): ChatItem => ({ type: 'message', data: m })),
-    ...systemEvents.map((e): ChatItem => ({ type: 'event', data: e }))
+    ...messages.filter(m => !isBlocked(m.username)).map((m): ChatItem => ({ type: 'message', data: m })),
+    ...systemEvents.filter(e => !isBlocked(e.username)).map((e): ChatItem => ({ type: 'event', data: e }))
   ].sort((a, b) => new Date(a.data.created_at).getTime() - new Date(b.data.created_at).getTime())
 
   return (
     <div className="flex gap-2 p-4 h-screen" onClick={handleUserInteraction}>
       {/* Main Chat Window */}
       <AOLWindow
-        title="Town Square - AOL Chat"
+        title={`${currentRoom} - AOL Chat`}
         width="700px"
         height="100%"
         className="flex-1"
@@ -414,8 +644,12 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         <div className="win95-menubar flex">
           <span className="win95-menubar-item"><u>F</u>ile</span>
           <span className="win95-menubar-item"><u>E</u>dit</span>
-          <span className="win95-menubar-item"><u>P</u>eople</span>
-          <span className="win95-menubar-item"><u>V</u>iew</span>
+          <span className="win95-menubar-item" onClick={() => setShowBuddyList(true)}>
+            <u>B</u>uddy List
+          </span>
+          <span className="win95-menubar-item" onClick={() => setShowRoomList(true)}>
+            <u>C</u>hat Rooms
+          </span>
           <span className="win95-menubar-item" onClick={() => setShowAwayDialog(true)}>
             <u>A</u>way
           </span>
@@ -423,7 +657,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         </div>
 
         {/* Toolbar */}
-        <div className="flex items-center gap-1 p-1 bg-[#c0c0c0] border-b border-[#808080]">
+        <div className="flex items-center gap-1 p-1 bg-[#c0c0c0] border-b border-[#808080] overflow-visible relative z-10">
           <button
             className={`win95-btn p-1 min-w-0 ${isBold ? 'border-inset' : ''}`}
             title="Bold"
@@ -467,6 +701,42 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
                 currentColor={selectedColor || undefined}
                 onSelect={(color) => setSelectedColor(color)}
                 onClose={() => setShowColorPicker(false)}
+              />
+            )}
+          </div>
+          <div className="relative">
+            <button
+              className="win95-btn p-1 min-w-0"
+              title="Font"
+              style={{ padding: '2px 6px', fontSize: '10px', fontFamily: selectedFont || 'inherit' }}
+              onClick={() => setShowFontPicker(!showFontPicker)}
+              type="button"
+            >
+              {selectedFont ? messageFonts.find(f => f.value === selectedFont)?.name.slice(0, 3) || 'Aa' : 'Aa'}
+            </button>
+            {showFontPicker && (
+              <FontPicker
+                currentFont={selectedFont}
+                onSelect={(font) => setSelectedFont(font)}
+                onClose={() => setShowFontPicker(false)}
+              />
+            )}
+          </div>
+          <div className="relative">
+            <button
+              className="win95-btn p-1 min-w-0"
+              title="Font Size"
+              style={{ padding: '2px 6px', fontSize: '10px' }}
+              onClick={() => setShowSizePicker(!showSizePicker)}
+              type="button"
+            >
+              {selectedSize ? messageSizes.find(s => s.value === selectedSize)?.name.slice(0, 2) || '14' : '14'}
+            </button>
+            {showSizePicker && (
+              <SizePicker
+                currentSize={selectedSize}
+                onSelect={(size) => setSelectedSize(size)}
+                onClose={() => setShowSizePicker(false)}
               />
             )}
           </div>
@@ -517,7 +787,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
           {isLoading ? (
             <div className="text-center text-gray-500 py-4">Loading messages...</div>
           ) : chatItems.length === 0 ? (
-            <div className="system-message">Welcome to the Town Square! You are the first one here.</div>
+            <div className="system-message">Welcome to {currentRoom}! You are the first one here.</div>
           ) : (
             chatItems.map((item) => {
               if (item.type === 'event') {
@@ -573,6 +843,14 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
               className="win95-input flex-1"
               placeholder="Type your message here..."
               maxLength={500}
+              style={{
+                fontWeight: isBold ? 'bold' : 'normal',
+                fontStyle: isItalic ? 'italic' : 'normal',
+                textDecoration: isUnderline ? 'underline' : 'none',
+                color: selectedColor || 'inherit',
+                fontFamily: selectedFont || 'inherit',
+                fontSize: selectedSize || 'inherit'
+              }}
             />
             <button type="submit" className="win95-btn">Send</button>
           </div>
@@ -581,10 +859,10 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         {/* Status Bar */}
         <div className="win95-statusbar">
           <div className="win95-statusbar-section">
-            {onlineUsers.length} people in chat
+            {usersInRoom.length} {usersInRoom.length === 1 ? 'person' : 'people'} in room
           </div>
           <div className="win95-statusbar-section" style={{ flex: 2 }}>
-            Connected as: {username} {awayMessage ? '(Away)' : ''}
+            {currentRoom} • {username} {awayMessage ? '(Away)' : ''}
           </div>
         </div>
       </AOLWindow>
@@ -593,20 +871,25 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       <AOLWindow title="People Here" width="180px" height="100%">
         <div className="p-2 flex-1 flex flex-col">
           <div className="text-xs mb-2 text-gray-600">
-            {onlineUsers.length} {onlineUsers.length === 1 ? 'person' : 'people'} in room
+            {usersInRoom.length} {usersInRoom.length === 1 ? 'person' : 'people'} in {currentRoom}
           </div>
           <div className="user-list flex-1 p-1">
-            {onlineUsers.map((user) => (
+            {usersInRoom.map((user) => (
               <div
                 key={user.username}
                 className={`flex items-center gap-2 p-1 cursor-pointer hover:bg-blue-100 ${
                   user.username === username ? 'bg-blue-50' : ''
-                }`}
+                } ${isBlocked(user.username) ? 'opacity-50' : ''}`}
                 onDoubleClick={() => openIM(user.username)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  if (user.username !== username) setShowWarnBlock(user.username)
+                }}
               >
                 <BuddyIcon username={user.username} isAway={!!user.away_message} />
                 <span className={`${user.username === username ? 'font-bold' : ''} ${user.away_message ? 'text-gray-400' : ''}`}>
                   {user.username}
+                  {isBlocked(user.username) && <span className="text-red-500 ml-1">🚫</span>}
                   {user.is_typing && user.username !== username && (
                     <span className="text-xs text-gray-400 ml-1">...</span>
                   )}
@@ -618,7 +901,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             <button
               className="win95-btn text-xs"
               onClick={() => {
-                const selected = onlineUsers.find(u => u.username !== username)
+                const selected = usersInRoom.find(u => u.username !== username)
                 if (selected) setShowProfile(selected.username)
               }}
               type="button"
@@ -628,14 +911,23 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             <button
               className="win95-btn text-xs"
               onClick={() => {
-                const selected = onlineUsers.find(u => u.username !== username)
+                const selected = usersInRoom.find(u => u.username !== username)
                 if (selected) openIM(selected.username)
               }}
               type="button"
             >
               Send IM
             </button>
-            <button className="win95-btn text-xs" type="button">Ignore</button>
+            <button
+              className="win95-btn text-xs"
+              onClick={() => {
+                const selected = usersInRoom.find(u => u.username !== username)
+                if (selected) setShowWarnBlock(selected.username)
+              }}
+              type="button"
+            >
+              Warn/Block
+            </button>
             <div className="win95-separator" />
             <button
               className="win95-btn text-xs"
@@ -681,6 +973,38 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
           currentMessage={awayMessage}
           onSave={handleSetAway}
           onClose={() => setShowAwayDialog(false)}
+        />
+      )}
+
+      {/* Buddy List Window */}
+      {showBuddyList && (
+        <BuddyListWindow
+          currentUser={username}
+          onOpenIM={openIM}
+          onViewProfile={(user) => setShowProfile(user)}
+          onClose={() => setShowBuddyList(false)}
+        />
+      )}
+
+      {/* Room List Window */}
+      {showRoomList && (
+        <RoomListWindow
+          currentRoom={currentRoom}
+          onJoinRoom={handleJoinRoom}
+          onClose={() => setShowRoomList(false)}
+        />
+      )}
+
+      {/* Warn/Block Dialog */}
+      {showWarnBlock && (
+        <WarnBlockDialog
+          targetUser={showWarnBlock}
+          warningLevel={getWarningLevel(showWarnBlock)}
+          isBlocked={isBlocked(showWarnBlock)}
+          onWarn={() => warnUser(showWarnBlock)}
+          onBlock={() => blockUser(showWarnBlock)}
+          onUnblock={() => unblockUser(showWarnBlock)}
+          onClose={() => setShowWarnBlock(null)}
         />
       )}
     </div>

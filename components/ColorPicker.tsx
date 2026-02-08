@@ -10,7 +10,7 @@ interface ColorPickerProps {
 
 export function ColorPicker({ onSelect, onClose, currentColor }: ColorPickerProps) {
   return (
-    <div className="absolute bottom-full left-0 mb-1 z-50">
+    <div className="absolute top-full left-0 mt-1 z-[100]">
       <div className="win95-window p-2" style={{ width: '160px' }}>
         <div className="win95-titlebar mb-2">
           <span className="text-xs">Text Color</span>
@@ -29,7 +29,7 @@ export function ColorPicker({ onSelect, onClose, currentColor }: ColorPickerProp
           {messageColors.map((color) => (
             <button
               key={color.value}
-              className="w-6 h-6 border cursor-pointer"
+              className="w-6 h-6 border cursor-pointer hover:scale-110 transition-transform"
               style={{
                 backgroundColor: color.value,
                 borderColor: currentColor === color.value ? '#000' : '#808080',
@@ -46,7 +46,7 @@ export function ColorPicker({ onSelect, onClose, currentColor }: ColorPickerProp
         </div>
 
         <div className="mt-2 text-xs text-gray-600 text-center">
-          Click to select color
+          {currentColor ? `Selected: ${messageColors.find(c => c.value === currentColor)?.name || currentColor}` : 'Click a color to select'}
         </div>
       </div>
     </div>
