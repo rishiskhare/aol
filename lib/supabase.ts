@@ -53,6 +53,37 @@ export type Message = {
 export type User = {
   username: string
   joined_at: string
+  is_typing?: boolean
+  away_message?: string | null
+  last_activity?: string
+}
+
+export type PrivateMessage = {
+  id: string
+  from_user: string
+  to_user: string
+  content: string
+  read: boolean
+  created_at: string
+}
+
+export type Profile = {
+  username: string
+  display_name?: string
+  location?: string
+  bio?: string
+  interests?: string
+  quote?: string
+  created_at: string
+  updated_at: string
+}
+
+export type SystemEvent = {
+  id: string
+  event_type: 'join' | 'leave' | 'away' | 'back'
+  username: string
+  message?: string
+  created_at: string
 }
 
 export function isSupabaseConfigured(): boolean {
