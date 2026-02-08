@@ -1,13 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+// Support both PUBLIC_KEY (current) and ANON_KEY (legacy) for backwards compatibility
+const supabasePublicKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLIC_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // Create a mock client for build time when env vars aren't available
 let supabase: SupabaseClient
 
-if (supabaseUrl && supabaseAnonKey) {
-  supabase = createClient(supabaseUrl, supabaseAnonKey)
+if (supabaseUrl && supabasePublicKey) {
+  supabase = createClient(supabaseUrl, supabasePublicKey)
 } else {
   // Create a dummy client that will fail gracefully at runtime
   // This allows the build to succeed
@@ -35,7 +36,7 @@ if (supabaseUrl && supabaseAnonKey) {
   if (typeof window !== 'undefined') {
     console.warn(
       'Supabase environment variables not configured. ' +
-      'Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local'
+      'Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLIC_KEY in .env.local'
     )
   }
 }
@@ -55,5 +56,5 @@ export type User = {
 }
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseUrl && supabaseAnonKey)
+  return Boolean(supabaseUrl && supabasePublicKey)
 }

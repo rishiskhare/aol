@@ -47,7 +47,7 @@ The app runs in **demo mode** without Supabase configuration - you can test the 
 
 4. Get your API credentials:
    - Go to Dashboard > Settings > API
-   - Copy your Project URL and anon/public key
+   - Copy your **Project URL** and **public** key (under Project API keys)
 
 5. Create `.env.local`:
    ```bash
@@ -57,7 +57,7 @@ The app runs in **demo mode** without Supabase configuration - you can test the 
 6. Add your credentials to `.env.local`:
    ```
    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   NEXT_PUBLIC_SUPABASE_PUBLIC_KEY=your-public-key
    ```
 
 7. Restart the dev server

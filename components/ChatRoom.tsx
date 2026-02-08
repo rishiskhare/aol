@@ -100,7 +100,27 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message
-          setMessages((prev) => [...prev, newMsg])
+          setMessages((prev) => {
+            // Check if this message was already added optimistically (same user, same content, within last 5 seconds)
+            const isDuplicate = prev.some(
+              (msg) =>
+                msg.id.startsWith('local-') &&
+                msg.username === newMsg.username &&
+                msg.content === newMsg.content &&
+                Math.abs(new Date(msg.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000
+            )
+            if (isDuplicate) {
+              // Replace the local message with the server message (which has the real ID)
+              return prev.map((msg) =>
+                msg.id.startsWith('local-') &&
+                msg.username === newMsg.username &&
+                msg.content === newMsg.content
+                  ? newMsg
+                  : msg
+              )
+            }
+            return [...prev, newMsg]
+          })
         }
       )
       .subscribe()
@@ -160,22 +180,22 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     const messageContent = newMessage.trim()
     setNewMessage('')
 
-    if (isDemoMode) {
-      // In demo mode, add message locally
-      const newMsg: Message = {
-        id: Date.now().toString(),
-        username,
-        content: messageContent,
-        created_at: new Date().toISOString()
-      }
-      setMessages((prev) => [...prev, newMsg])
-      return
-    }
-
-    await supabase.from('messages').insert({
+    // Optimistically add message locally for immediate feedback
+    const newMsg: Message = {
+      id: `local-${Date.now()}`,
       username,
-      content: messageContent
-    })
+      content: messageContent,
+      created_at: new Date().toISOString()
+    }
+    setMessages((prev) => [...prev, newMsg])
+
+    // If Supabase is configured, also persist to database
+    if (!isDemoMode) {
+      await supabase.from('messages').insert({
+        username,
+        content: messageContent
+      })
+    }
   }
 
   const handleSignOut = async () => {
