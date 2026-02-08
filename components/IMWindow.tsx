@@ -60,21 +60,52 @@ export function IMWindow({
   useEffect(() => {
     if (!isSupabaseConfigured()) return
 
+    // Create a consistent channel name by sorting usernames
+    const channelName = `im-${[currentUser, otherUser].sort().join('-')}`
+
     const channel = supabase
-      .channel(`im-${currentUser}-${otherUser}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'private_messages',
-          filter: `to_user=eq.${currentUser}`
+          table: 'private_messages'
         },
         (payload) => {
           const newMsg = payload.new as PrivateMessage
-          if (newMsg.from_user === otherUser) {
-            setMessages((prev) => [...prev, newMsg])
-            playIMReceived()
+          // Check if this message is part of this conversation
+          const isForThisConversation =
+            (newMsg.from_user === currentUser && newMsg.to_user === otherUser) ||
+            (newMsg.from_user === otherUser && newMsg.to_user === currentUser)
+
+          if (isForThisConversation) {
+            // Avoid duplicates from optimistic updates
+            setMessages((prev) => {
+              const isDuplicate = prev.some(
+                (msg) =>
+                  msg.id === newMsg.id ||
+                  (msg.id.startsWith('local-') &&
+                    msg.from_user === newMsg.from_user &&
+                    msg.content === newMsg.content &&
+                    Math.abs(new Date(msg.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000)
+              )
+              if (isDuplicate) {
+                // Replace local message with server message
+                return prev.map((msg) =>
+                  msg.id.startsWith('local-') &&
+                  msg.from_user === newMsg.from_user &&
+                  msg.content === newMsg.content
+                    ? newMsg
+                    : msg
+                )
+              }
+              // Play sound only for messages from the other user
+              if (newMsg.from_user === otherUser) {
+                playIMReceived()
+              }
+              return [...prev, newMsg]
+            })
           }
         }
       )
