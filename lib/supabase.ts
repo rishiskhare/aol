@@ -48,6 +48,23 @@ export type Message = {
   username: string
   content: string
   created_at: string
+  room?: string
+}
+
+export type Room = {
+  id: string
+  name: string
+  invite_code: string
+  created_by: string
+  is_private: boolean
+  created_at: string
+}
+
+export type RoomMember = {
+  id: string
+  room_id: string
+  username: string
+  joined_at: string
 }
 
 export type User = {

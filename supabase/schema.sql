@@ -116,6 +116,48 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Rooms table (private invite-only rooms)
+CREATE TABLE IF NOT EXISTS rooms (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  invite_code TEXT UNIQUE NOT NULL,
+  created_by TEXT NOT NULL,
+  is_private BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Room members table (tracks who has redeemed an invite)
+CREATE TABLE IF NOT EXISTS room_members (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+  username TEXT NOT NULL,
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(room_id, username)
+);
+
+-- Add room column to messages (backwards-compatible)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS room TEXT DEFAULT 'Town Square';
+
+-- Indexes for rooms
+CREATE INDEX IF NOT EXISTS idx_rooms_invite_code ON rooms(invite_code);
+CREATE INDEX IF NOT EXISTS idx_room_members_room_id ON room_members(room_id);
+CREATE INDEX IF NOT EXISTS idx_room_members_username ON room_members(username);
+CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room);
+
+-- RLS for rooms
+ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE room_members ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can read rooms" ON rooms FOR SELECT USING (true);
+CREATE POLICY "Anyone can insert rooms" ON rooms FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Anyone can read room members" ON room_members FOR SELECT USING (true);
+CREATE POLICY "Anyone can insert room members" ON room_members FOR INSERT WITH CHECK (true);
+
+-- Realtime for rooms
+ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
+ALTER PUBLICATION supabase_realtime ADD TABLE room_members;
+
 -- Function to clean up old system events (keep last 100)
 CREATE OR REPLACE FUNCTION cleanup_old_system_events()
 RETURNS void AS $$

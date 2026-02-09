@@ -5,10 +5,17 @@ import { LoginDialog } from '@/components/LoginDialog'
 import { ChatRoom } from '@/components/ChatRoom'
 import { WelcomeScreen } from '@/components/WelcomeScreen'
 
+interface PendingInvite {
+  roomId: string
+  roomName: string
+  inviteCode: string
+}
+
 export default function Home() {
   const [username, setUsername] = useState<string | null>(null)
   const [isClient, setIsClient] = useState(false)
   const [showWelcome, setShowWelcome] = useState(false)
+  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null)
 
   useEffect(() => {
     setIsClient(true)
@@ -16,6 +23,13 @@ export default function Home() {
     const savedUsername = localStorage.getItem('aol_username')
     if (savedUsername) {
       setUsername(savedUsername)
+    }
+    // Check for pending invite
+    const invite = localStorage.getItem('aol_pending_invite')
+    if (invite) {
+      try {
+        setPendingInvite(JSON.parse(invite))
+      } catch { /* ignore */ }
     }
   }, [])
 
@@ -49,7 +63,7 @@ export default function Home() {
     <main className="min-h-screen">
       {showWelcome && <WelcomeScreen onComplete={handleWelcomeComplete} />}
       {username ? (
-        <ChatRoom username={username} onSignOut={handleSignOut} />
+        <ChatRoom username={username} onSignOut={handleSignOut} pendingInvite={pendingInvite} />
       ) : (
         <LoginDialog onLogin={handleLogin} />
       )}

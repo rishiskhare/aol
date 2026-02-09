@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { supabase, Message, User, SystemEvent, isSupabaseConfigured } from '@/lib/supabase'
+import { supabase, Message, User, SystemEvent, Room, isSupabaseConfigured } from '@/lib/supabase'
 import { AOLWindow } from './AOLWindow'
 import { EmoticonPicker } from './EmoticonPicker'
 import { ColorPicker } from './ColorPicker'
@@ -33,9 +33,16 @@ interface UserWarning {
   level: number
 }
 
+interface PendingInvite {
+  roomId: string
+  roomName: string
+  inviteCode: string
+}
+
 interface ChatRoomProps {
   username: string
   onSignOut: () => void
+  pendingInvite?: PendingInvite | null
 }
 
 // Generate consistent color for a username
@@ -68,7 +75,7 @@ type ChatItem =
   | { type: 'message'; data: Message }
   | { type: 'event'; data: SystemEvent }
 
-export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
+export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([])
   const [onlineUsers, setOnlineUsers] = useState<User[]>([])
@@ -104,6 +111,8 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
   const [showWarnBlock, setShowWarnBlock] = useState<string | null>(null)
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([])
   const [userWarnings, setUserWarnings] = useState<UserWarning[]>([])
+  const [roomCache, setRoomCache] = useState<Record<string, Room>>({})
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -178,6 +187,48 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     }
   }, [audioInitialized])
 
+  // Handle pending invite on mount
+  useEffect(() => {
+    if (!pendingInvite || !isSupabaseConfigured()) return
+
+    const redeemInvite = async () => {
+      // Upsert into room_members
+      await supabase.from('room_members').upsert({
+        room_id: pendingInvite.roomId,
+        username,
+      }, { onConflict: 'room_id,username' })
+
+      // Cache the room info
+      const { data } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', pendingInvite.roomId)
+        .single()
+
+      if (data) {
+        setRoomCache(prev => ({ ...prev, [`room:${data.id}`]: data as Room }))
+      }
+
+      // Switch to the private room
+      const roomKey = `room:${pendingInvite.roomId}`
+      setMessages([])
+      setSystemEvents([])
+      previousRoomUsersRef.current = new Set()
+      setCurrentRoom(roomKey)
+
+      // Update current room in database
+      await supabase
+        .from('online_users')
+        .update({ current_room: roomKey })
+        .eq('username', username)
+
+      // Clear pending invite
+      localStorage.removeItem('aol_pending_invite')
+    }
+
+    redeemInvite()
+  }, [pendingInvite, username])
+
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
@@ -240,6 +291,9 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message
+          // Filter by current room (client-side since Supabase doesn't support column-level INSERT filters)
+          const msgRoom = newMsg.room || 'Town Square'
+          if (msgRoom !== currentRoom) return
           // Filter blocked users
           if (isBlocked(newMsg.username)) return
 
@@ -469,14 +523,16 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       id: `local-${Date.now()}`,
       username,
       content: messageContent,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      room: currentRoom
     }
     setMessages((prev) => [...prev, newMsg])
 
     if (!isDemoMode) {
       await supabase.from('messages').insert({
         username,
-        content: messageContent
+        content: messageContent,
+        room: currentRoom
       })
     }
   }
@@ -499,10 +555,15 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     onSignOut()
   }
 
-  const handleJoinRoom = async (roomName: string) => {
+  const handleJoinRoom = async (roomName: string, roomData?: Room) => {
     if (roomName === currentRoom) {
       setShowRoomList(false)
       return
+    }
+
+    // Cache room data if provided (for private rooms)
+    if (roomData) {
+      setRoomCache(prev => ({ ...prev, [roomName]: roomData }))
     }
 
     // Clear messages and events when switching rooms
@@ -605,6 +666,21 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     })
   }
 
+  // Resolve display name for current room
+  const isPrivateRoom = currentRoom.startsWith('room:')
+  const roomDisplayName = isPrivateRoom
+    ? (roomCache[currentRoom]?.name || 'Private Room')
+    : currentRoom
+
+  const handleShareInvite = () => {
+    const room = roomCache[currentRoom]
+    if (!room) return
+    const inviteUrl = `${window.location.origin}/invite/${room.invite_code}`
+    navigator.clipboard.writeText(inviteUrl)
+    setInviteCopied(true)
+    setTimeout(() => setInviteCopied(false), 2000)
+  }
+
   // Filter users to current room only, and only show active users (activity in last 60 seconds)
   const usersInRoom = onlineUsers.filter(u => {
     const inRoom = (u.current_room || 'Town Square') === currentRoom
@@ -638,7 +714,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
     <div className="flex gap-2 p-4 h-screen" onClick={handleUserInteraction}>
       {/* Main Chat Window */}
       <AOLWindow
-        title={`${currentRoom} - AOL Chat`}
+        title={`${roomDisplayName} - AOL Chat`}
         width="700px"
         height="100%"
         className="flex-1"
@@ -769,6 +845,17 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             )}
           </div>
           <div className="flex-1" />
+          {isPrivateRoom && roomCache[currentRoom] && (
+            <button
+              className="win95-btn p-1 min-w-0"
+              title="Share Invite Link"
+              style={{ padding: '2px 6px', fontSize: '10px' }}
+              onClick={handleShareInvite}
+              type="button"
+            >
+              {inviteCopied ? 'Copied!' : 'Share Invite'}
+            </button>
+          )}
           <button
             className={`win95-btn p-1 min-w-0 ${soundEnabled ? '' : 'border-inset'}`}
             title={soundEnabled ? 'Mute Sounds' : 'Enable Sounds'}
@@ -797,7 +884,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
           {isLoading ? (
             <div className="text-center text-gray-500 py-4">Loading messages...</div>
           ) : chatItems.length === 0 ? (
-            <div className="system-message">Welcome to {currentRoom}! You are the first one here.</div>
+            <div className="system-message">Welcome to {roomDisplayName}! You are the first one here.</div>
           ) : (
             chatItems.map((item) => {
               if (item.type === 'event') {
@@ -872,7 +959,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             {usersInRoom.length} {usersInRoom.length === 1 ? 'person' : 'people'} in room
           </div>
           <div className="win95-statusbar-section" style={{ flex: 2 }}>
-            {currentRoom} • {username} {awayMessage ? '(Away)' : ''}
+            {roomDisplayName} • {username} {awayMessage ? '(Away)' : ''}
           </div>
         </div>
       </AOLWindow>
@@ -881,7 +968,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       <AOLWindow title="People Here" width="180px" height="100%">
         <div className="p-2 flex-1 flex flex-col">
           <div className="text-xs mb-2 text-gray-600">
-            {usersInRoom.length} {usersInRoom.length === 1 ? 'person' : 'people'} in {currentRoom}
+            {usersInRoom.length} {usersInRoom.length === 1 ? 'person' : 'people'} in {roomDisplayName}
           </div>
           <div className="user-list flex-1 p-1">
             {usersInRoom.map((user) => (
@@ -998,6 +1085,7 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       {/* Room List Window */}
       {showRoomList && (
         <RoomListWindow
+          username={username}
           currentRoom={currentRoom}
           onJoinRoom={handleJoinRoom}
           onClose={() => setShowRoomList(false)}
