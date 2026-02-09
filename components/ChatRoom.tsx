@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase, Message, User, SystemEvent, Room, isSupabaseConfigured } from '@/lib/supabase'
 import { AOLWindow } from './AOLWindow'
 import { EmoticonPicker } from './EmoticonPicker'
@@ -120,6 +120,23 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const previousRoomUsersRef = useRef<Set<string>>(new Set())
   const joinTimeRef = useRef<string>(new Date().toISOString())
+  const broadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  // O(1) dedup: track all message IDs we've already rendered
+  const seenMsgIdsRef = useRef<Set<string>>(new Set())
+  // Track last poll time so we only fetch genuinely new messages.
+  // Initialize 30s in the past to absorb client/server clock skew on first poll.
+  const lastPollTimeRef = useRef<string>(new Date(Date.now() - 30000).toISOString())
+
+  // Refs for values read inside subscription callbacks (avoids stale closures & unnecessary re-subscribes)
+  const currentRoomRef = useRef(currentRoom)
+  const soundEnabledRef = useRef(soundEnabled)
+  const blockedUsersRef = useRef(blockedUsers)
+
+  // Keep refs in sync with state
+  useEffect(() => { currentRoomRef.current = currentRoom }, [currentRoom])
+  useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])
+  useEffect(() => { blockedUsersRef.current = blockedUsers }, [blockedUsers])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -210,11 +227,16 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         setRoomCache(prev => ({ ...prev, [`room:${data.id}`]: data as Room }))
       }
 
-      // Switch to the private room
+      // Switch to the private room — clear all tracking refs
+      // Use 5s lookback buffer on poll cursor to absorb client/server clock skew
       const roomKey = `room:${pendingInvite.roomId}`
+      const now = new Date().toISOString()
       setMessages([])
       setSystemEvents([])
       previousRoomUsersRef.current = new Set()
+      seenMsgIdsRef.current.clear()
+      joinTimeRef.current = now
+      lastPollTimeRef.current = new Date(Date.now() - 5000).toISOString()
       setCurrentRoom(roomKey)
 
       // Update current room in database
@@ -230,6 +252,36 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
     redeemInvite()
   }, [pendingInvite, username])
 
+  // Poll for messages since last poll — pure ID-based dedup, single setState call.
+  const pollRoomMessages = useCallback(async (room: string) => {
+    if (!isSupabaseConfigured()) return
+    const since = lastPollTimeRef.current
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('room', room)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(200)
+    if (!data || data.length === 0) return
+
+    // Advance poll cursor to newest message (server timestamp)
+    lastPollTimeRef.current = data[data.length - 1].created_at
+
+    const newMsgs: Message[] = []
+    for (const msg of data) {
+      if (seenMsgIdsRef.current.has(msg.id)) continue
+      if ((msg.room || 'Town Square') !== currentRoomRef.current) continue
+      if (blockedUsersRef.current.some(b => b.username === msg.username)) continue
+      seenMsgIdsRef.current.add(msg.id)
+      newMsgs.push(msg)
+    }
+
+    if (newMsgs.length > 0) {
+      setMessages(prev => [...prev, ...newMsgs])
+    }
+  }, [])
+
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
@@ -237,7 +289,6 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
 
       if (!isSupabaseConfigured()) {
         setIsDemoMode(true)
-        // In demo mode, start with empty messages (user just joined)
         setMessages([])
         setOnlineUsers([...demoUsers, { username, joined_at: new Date().toISOString() }])
         previousRoomUsersRef.current = new Set(demoUsers.map(u => u.username))
@@ -245,11 +296,8 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         return
       }
 
-      // Record join time
-      const joinTime = new Date().toISOString()
-      joinTimeRef.current = joinTime
-
-      // Don't fetch old messages - users only see messages from when they joined
+      // Record join time — only see messages from this point forward
+      joinTimeRef.current = new Date().toISOString()
       setMessages([])
 
       // Clean up stale users (no activity in last 2 minutes)
@@ -267,144 +315,150 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
 
       if (usersData) {
         setOnlineUsers(usersData)
-        // Track users in the current room
         const roomUsers = usersData.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
         previousRoomUsersRef.current = new Set(roomUsers.map((u: User) => u.username))
       }
 
-      // Don't fetch old system events - start fresh
       setSystemEvents([])
-
       setIsLoading(false)
     }
 
     fetchData()
   }, [username])
 
-  // Subscribe to real-time updates
+  // Message handler — pure ID-based dedup via seenMsgIdsRef.
+  // Since the sender generates the UUID and uses it everywhere (optimistic, broadcast, DB insert),
+  // the same ID appears across all delivery paths. Dedup is a single Set.has() check.
+  const addIncomingMessage = useCallback((newMsg: Message) => {
+    const msgRoom = newMsg.room || 'Town Square'
+    if (msgRoom !== currentRoomRef.current) return
+    if (blockedUsersRef.current.some(b => b.username === newMsg.username)) return
+    if (seenMsgIdsRef.current.has(newMsg.id)) return
+
+    seenMsgIdsRef.current.add(newMsg.id)
+    if (newMsg.username !== username && soundEnabledRef.current) {
+      playIMReceived()
+    }
+    setMessages(prev => [...prev, newMsg])
+  }, [username])
+
+  // Subscribe to real-time updates — stable subscription, reads current values from refs
   useEffect(() => {
     if (!isSupabaseConfigured()) return
 
+    // Poll immediately when a channel becomes SUBSCRIBED — catches messages
+    // sent during the async connection window that broadcast/postgres_changes missed.
+    let hasPolledOnReady = false
+    const pollOnceWhenReady = () => {
+      if (!hasPolledOnReady) {
+        hasPolledOnReady = true
+        pollRoomMessages(currentRoomRef.current)
+      }
+    }
+
+    // Broadcast channel for instant message delivery (bypasses DB round-trip)
+    const broadcastChannel = supabase
+      .channel('chat-broadcast')
+      .on('broadcast', { event: 'new-message' }, (payload) => {
+        const msg = payload.payload as Message
+        addIncomingMessage(msg)
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') pollOnceWhenReady()
+      })
+
+    broadcastChannelRef.current = broadcastChannel
+
+    // postgres_changes as secondary delivery (may arrive later, dedup handles it)
     const messagesChannel = supabase
       .channel('messages')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
-          const newMsg = payload.new as Message
-          // Filter by current room (client-side since Supabase doesn't support column-level INSERT filters)
-          const msgRoom = newMsg.room || 'Town Square'
-          if (msgRoom !== currentRoom) return
-          // Filter blocked users
-          if (isBlocked(newMsg.username)) return
-
-          setMessages((prev) => {
-            const isDuplicate = prev.some(
-              (msg) =>
-                msg.id.startsWith('local-') &&
-                msg.username === newMsg.username &&
-                msg.content === newMsg.content &&
-                Math.abs(new Date(msg.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000
-            )
-            if (isDuplicate) {
-              return prev.map((msg) =>
-                msg.id.startsWith('local-') &&
-                  msg.username === newMsg.username &&
-                  msg.content === newMsg.content
-                  ? newMsg
-                  : msg
-              )
-            }
-            // Play sound for messages from others
-            if (newMsg.username !== username && soundEnabled) {
-              playIMReceived()
-            }
-            return [...prev, newMsg]
-          })
+          addIncomingMessage(payload.new as Message)
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') pollOnceWhenReady()
+      })
+
+    const processUserData = (data: User[]) => {
+      setOnlineUsers(data)
+
+      const room = currentRoomRef.current
+      const roomUsers = data.filter((u: User) => (u.current_room || 'Town Square') === room)
+      const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
+      const oldRoomUsernames = previousRoomUsersRef.current
+
+      for (const u of roomUsers) {
+        if (!oldRoomUsernames.has(u.username) && u.username !== username) {
+          if (soundEnabledRef.current) playDoorOpen()
+          setSystemEvents((prev) => [...prev, {
+            id: `local-${Date.now()}-${u.username}`,
+            event_type: 'join' as const,
+            username: u.username,
+            created_at: new Date().toISOString()
+          }])
+        }
+      }
+
+      for (const oldUser of oldRoomUsernames) {
+        if (!newRoomUsernames.has(oldUser) && oldUser !== username) {
+          if (soundEnabledRef.current) playDoorClose()
+          setSystemEvents((prev) => [...prev, {
+            id: `local-${Date.now()}-${oldUser}`,
+            event_type: 'leave' as const,
+            username: oldUser,
+            created_at: new Date().toISOString()
+          }])
+        }
+      }
+
+      previousRoomUsersRef.current = newRoomUsernames
+
+      const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
+      setTypingUsers(typing)
+    }
+
+    const fetchAndProcessUsers = async () => {
+      const { data } = await supabase
+        .from('online_users')
+        .select('*')
+        .order('joined_at', { ascending: true })
+      if (data) processUserData(data)
+    }
 
     const usersChannel = supabase
       .channel('online_users')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'online_users' },
-        async () => {
-          const { data } = await supabase
-            .from('online_users')
-            .select('*')
-            .order('joined_at', { ascending: true })
-
-          if (data) {
-            setOnlineUsers(data)
-
-            // Filter to users in current room
-            const roomUsers = data.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
-            const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
-            const oldRoomUsernames = previousRoomUsersRef.current
-
-            // Check for users who joined this room (door open)
-            for (const u of roomUsers) {
-              if (!oldRoomUsernames.has(u.username) && u.username !== username) {
-                if (soundEnabled) playDoorOpen()
-                setSystemEvents((prev) => [...prev, {
-                  id: `local-${Date.now()}-${u.username}`,
-                  event_type: 'join' as const,
-                  username: u.username,
-                  created_at: new Date().toISOString()
-                }])
-              }
-            }
-
-            // Check for users who left this room (door close)
-            for (const oldUser of oldRoomUsernames) {
-              if (!newRoomUsernames.has(oldUser) && oldUser !== username) {
-                if (soundEnabled) playDoorClose()
-                setSystemEvents((prev) => [...prev, {
-                  id: `local-${Date.now()}-${oldUser}`,
-                  event_type: 'leave' as const,
-                  username: oldUser,
-                  created_at: new Date().toISOString()
-                }])
-              }
-            }
-
-            previousRoomUsersRef.current = newRoomUsernames
-
-            // Update typing users (only in current room)
-            const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
-            setTypingUsers(typing)
-          }
-        }
+        fetchAndProcessUsers
       )
       .subscribe()
 
-    // Polling fallback: refetch online users periodically in case realtime events are missed
-    const pollInterval = setInterval(async () => {
-      const { data } = await supabase
-        .from('online_users')
-        .select('*')
-        .order('joined_at', { ascending: true })
+    // Safety net: if channels take too long to connect, poll anyway after 2s
+    const safetyTimeout = setTimeout(() => pollOnceWhenReady(), 2000)
 
-      if (data) {
-        setOnlineUsers(data)
+    // Polling fallback for missed realtime events
+    const userPollInterval = setInterval(fetchAndProcessUsers, 10000)
 
-        const roomUsers = data.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
-        const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
-        previousRoomUsersRef.current = newRoomUsernames
-
-        const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
-        setTypingUsers(typing)
-      }
-    }, 10000)
+    // Message polling fallback — catches anything realtime/broadcast misses
+    const msgPollInterval = setInterval(() => {
+      pollRoomMessages(currentRoomRef.current)
+    }, 3000)
 
     return () => {
-      clearInterval(pollInterval)
+      clearTimeout(safetyTimeout)
+      clearInterval(userPollInterval)
+      clearInterval(msgPollInterval)
+      broadcastChannelRef.current = null
+      supabase.removeChannel(broadcastChannel)
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
     }
-  }, [username, soundEnabled, isBlocked, currentRoom])
+  }, [username, pollRoomMessages, addIncomingMessage])
 
   // Register user as online with heartbeat
   useEffect(() => {
@@ -508,33 +562,45 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
 
     setNewMessage('')
 
-    // Clear typing indicator
+    // Clear typing timeout locally (non-blocking)
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
     }
-    if (isSupabaseConfigured()) {
-      await supabase
-        .from('online_users')
-        .update({ is_typing: false })
-        .eq('username', username)
-    }
 
-    // Optimistic update
+    // Generate a real UUID client-side. This same ID is used in the optimistic update,
+    // the broadcast, AND the DB insert — so all delivery paths share one ID and
+    // dedup is a trivial Set.has() check. No content-key matching needed.
+    const msgId = crypto.randomUUID()
     const newMsg: Message = {
-      id: `local-${Date.now()}`,
+      id: msgId,
       username,
       content: messageContent,
       created_at: new Date().toISOString(),
       room: currentRoom
     }
+    seenMsgIdsRef.current.add(msgId)
     setMessages((prev) => [...prev, newMsg])
 
     if (!isDemoMode) {
-      await supabase.from('messages').insert({
-        username,
-        content: messageContent,
-        room: currentRoom
+      // Broadcast for instant delivery to other clients (same UUID = trivial dedup)
+      broadcastChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'new-message',
+        payload: newMsg,
       })
+
+      // DB insert with client-generated UUID + typing clear, concurrently
+      await Promise.all([
+        supabase.from('messages').insert({
+          id: msgId,
+          username,
+          content: messageContent,
+          room: currentRoom
+        }),
+        isSupabaseConfigured()
+          ? supabase.from('online_users').update({ is_typing: false }).eq('username', username)
+          : Promise.resolve()
+      ])
     }
   }
 
@@ -567,10 +633,15 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
       setRoomCache(prev => ({ ...prev, [roomName]: roomData }))
     }
 
-    // Clear messages and events when switching rooms
+    // Clear everything for the new room — only see messages from now
+    // Use 5s lookback buffer on poll cursor to absorb client/server clock skew
+    const now = new Date().toISOString()
     setMessages([])
     setSystemEvents([])
     previousRoomUsersRef.current = new Set()
+    seenMsgIdsRef.current.clear()
+    joinTimeRef.current = now
+    lastPollTimeRef.current = new Date(Date.now() - 5000).toISOString()
     setCurrentRoom(roomName)
     setShowRoomList(false)
 
@@ -693,34 +764,39 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
     setShowInviteDialog({ inviteCode, roomName })
   }
 
-  // Filter users to current room only, and only show active users (activity in last 60 seconds)
-  const usersInRoom = onlineUsers.filter(u => {
-    const inRoom = (u.current_room || 'Town Square') === currentRoom
-    if (!inRoom) return false
+  // Memoize users in current room — only recomputes when onlineUsers or currentRoom changes
+  const usersInRoom = useMemo(() => {
+    const now = Date.now()
+    return onlineUsers.filter(u => {
+      if ((u.current_room || 'Town Square') !== currentRoom) return false
+      const ts = u.last_activity || u.joined_at
+      if (ts) return (now - new Date(ts).getTime()) < 300000
+      return true
+    })
+  }, [onlineUsers, currentRoom])
 
-    // Check if user is active (last_activity within 5 minutes to account for clock skew)
-    if (u.last_activity) {
-      const lastActivity = new Date(u.last_activity).getTime()
-      const now = Date.now()
-      const isActive = (now - lastActivity) < 300000 // 5 minutes
-      return isActive
+  // O(n+m) merge of two already-ordered arrays — no sorting needed.
+  // Messages and systemEvents are both append-only, so they're inherently ordered by created_at.
+  const chatItems = useMemo((): ChatItem[] => {
+    const filteredMsgs = messages.filter(m => !isBlocked(m.username))
+    const filteredEvents = systemEvents.filter(e => !isBlocked(e.username))
+
+    if (filteredEvents.length === 0) return filteredMsgs.map(m => ({ type: 'message' as const, data: m }))
+    if (filteredMsgs.length === 0) return filteredEvents.map(e => ({ type: 'event' as const, data: e }))
+
+    const result: ChatItem[] = []
+    let mi = 0, ei = 0
+    while (mi < filteredMsgs.length && ei < filteredEvents.length) {
+      if (filteredMsgs[mi].created_at <= filteredEvents[ei].created_at) {
+        result.push({ type: 'message', data: filteredMsgs[mi++] })
+      } else {
+        result.push({ type: 'event', data: filteredEvents[ei++] })
+      }
     }
-
-    // If no last_activity, check joined_at (for backwards compatibility)
-    if (u.joined_at) {
-      const joinedAt = new Date(u.joined_at).getTime()
-      const now = Date.now()
-      return (now - joinedAt) < 300000 // 5 minutes
-    }
-
-    return true
-  })
-
-  // Combine messages and events for timeline, filtering blocked users
-  const chatItems: ChatItem[] = [
-    ...messages.filter(m => !isBlocked(m.username)).map((m): ChatItem => ({ type: 'message', data: m })),
-    ...systemEvents.filter(e => !isBlocked(e.username)).map((e): ChatItem => ({ type: 'event', data: e }))
-  ].sort((a, b) => new Date(a.data.created_at).getTime() - new Date(b.data.created_at).getTime())
+    while (mi < filteredMsgs.length) result.push({ type: 'message', data: filteredMsgs[mi++] })
+    while (ei < filteredEvents.length) result.push({ type: 'event', data: filteredEvents[ei++] })
+    return result
+  }, [messages, systemEvents, isBlocked])
 
   return (
     <div className="flex gap-2 p-4 h-screen" onClick={handleUserInteraction}>

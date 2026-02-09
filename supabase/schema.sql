@@ -143,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_rooms_invite_code ON rooms(invite_code);
 CREATE INDEX IF NOT EXISTS idx_room_members_room_id ON room_members(room_id);
 CREATE INDEX IF NOT EXISTS idx_room_members_username ON room_members(username);
 CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room);
+CREATE INDEX IF NOT EXISTS idx_messages_room_created_at ON messages(room, created_at);
 
 -- RLS for rooms
 ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
