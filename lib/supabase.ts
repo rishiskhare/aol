@@ -104,6 +104,15 @@ export type SystemEvent = {
   created_at: string
 }
 
+export type FriendRequest = {
+  id: string
+  from_user: string
+  to_user: string
+  status: 'pending' | 'accepted' | 'declined'
+  created_at: string
+  updated_at: string
+}
+
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseUrl && supabasePublicKey)
 }

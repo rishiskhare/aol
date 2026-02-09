@@ -8,6 +8,8 @@ interface ProfileWindowProps {
   username: string
   isOwnProfile: boolean
   onClose: () => void
+  onSendIM?: (username: string) => void
+  onAddBuddy?: (username: string) => void
 }
 
 const defaultProfile: Profile = {
@@ -21,7 +23,7 @@ const defaultProfile: Profile = {
   updated_at: new Date().toISOString()
 }
 
-export function ProfileWindow({ username, isOwnProfile, onClose }: ProfileWindowProps) {
+export function ProfileWindow({ username, isOwnProfile, onClose, onSendIM, onAddBuddy }: ProfileWindowProps) {
   const [profile, setProfile] = useState<Profile>({ ...defaultProfile, username })
   const [isEditing, setIsEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -236,8 +238,8 @@ export function ProfileWindow({ username, isOwnProfile, onClose }: ProfileWindow
                   </button>
                 ) : (
                   <>
-                    <button className="win95-btn" type="button">Send IM</button>
-                    <button className="win95-btn" type="button">Add Buddy</button>
+                    <button className="win95-btn" type="button" onClick={() => { onSendIM?.(username); onClose() }}>Send IM</button>
+                    <button className="win95-btn" type="button" onClick={() => { onAddBuddy?.(username); onClose() }}>Add Buddy</button>
                   </>
                 )}
                 <button className="win95-btn" onClick={onClose} type="button">

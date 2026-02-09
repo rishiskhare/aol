@@ -171,3 +171,30 @@ BEGIN
   );
 END;
 $$ LANGUAGE plpgsql;
+
+-- Friend requests table (an accepted request IS the friendship)
+CREATE TABLE IF NOT EXISTS friend_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  from_user TEXT NOT NULL,
+  to_user TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'accepted', 'declined'
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(from_user, to_user)
+);
+
+-- Indexes for friend requests
+CREATE INDEX IF NOT EXISTS idx_friend_requests_from_user ON friend_requests(from_user);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_to_user ON friend_requests(to_user);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_status ON friend_requests(status);
+
+-- RLS for friend requests
+ALTER TABLE friend_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can read friend requests" ON friend_requests FOR SELECT USING (true);
+CREATE POLICY "Anyone can insert friend requests" ON friend_requests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Anyone can update friend requests" ON friend_requests FOR UPDATE USING (true);
+CREATE POLICY "Anyone can delete friend requests" ON friend_requests FOR DELETE USING (true);
+
+-- Realtime for friend requests
+ALTER PUBLICATION supabase_realtime ADD TABLE friend_requests;

@@ -19,6 +19,7 @@ import {
   playDoorOpen,
   playDoorClose,
   playIMReceived,
+  playBuddyOnline,
   initAudio
 } from '@/lib/sounds'
 
@@ -115,6 +116,11 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
   const [inviteCopied, setInviteCopied] = useState(false)
   const [showInviteDialog, setShowInviteDialog] = useState<{ inviteCode: string; roomName: string } | null>(null)
 
+  // Friend request notifications
+  const [friendRequestCount, setFriendRequestCount] = useState(0)
+  const [friendRequestNotification, setFriendRequestNotification] = useState<string | null>(null)
+  const [buddyListInitialTab, setBuddyListInitialTab] = useState<'friends' | 'requests' | undefined>(undefined)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -163,6 +169,47 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
   useEffect(() => {
     localStorage.setItem('aol_warnings', JSON.stringify(userWarnings))
   }, [userWarnings])
+
+  // Friend request notifications — fetch count + subscribe to new incoming requests
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
+    const fetchPendingCount = async () => {
+      const { data } = await supabase
+        .from('friend_requests')
+        .select('id')
+        .eq('to_user', username)
+        .eq('status', 'pending')
+      setFriendRequestCount(data?.length || 0)
+    }
+
+    fetchPendingCount()
+
+    const channel = supabase
+      .channel('friend-request-notify')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'friend_requests', filter: `to_user=eq.${username}` },
+        (payload) => {
+          const req = payload.new as { from_user: string; status: string }
+          if (req.status === 'pending') {
+            setFriendRequestCount(prev => prev + 1)
+            setFriendRequestNotification(req.from_user)
+            if (soundEnabledRef.current) playBuddyOnline()
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_requests' },
+        () => { fetchPendingCount() }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [username])
 
   // Helper functions for warn/block
   const isBlocked = useCallback((targetUsername: string) => {
@@ -811,8 +858,13 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         <div className="win95-menubar flex">
           <span className="win95-menubar-item"><u>F</u>ile</span>
           <span className="win95-menubar-item"><u>E</u>dit</span>
-          <span className="win95-menubar-item" onClick={() => setShowBuddyList(true)}>
+          <span className="win95-menubar-item relative" onClick={() => { setBuddyListInitialTab(undefined); setShowBuddyList(true) }}>
             <u>B</u>uddy List
+            {friendRequestCount > 0 && (
+              <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold leading-none">
+                {friendRequestCount}
+              </span>
+            )}
           </span>
           <span className="win95-menubar-item" onClick={() => setShowRoomList(true)}>
             <u>C</u>hat Rooms
@@ -964,6 +1016,24 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         {awayMessage && (
           <div className="bg-orange-100 border-b border-orange-300 px-3 py-1 text-xs text-orange-800">
             You are away: {awayMessage} <button className="underline ml-2" onClick={() => handleSetAway(null)}>I&apos;m back</button>
+          </div>
+        )}
+        {friendRequestNotification && (
+          <div className="bg-blue-100 border-b border-blue-300 px-3 py-1 text-xs text-blue-800 flex items-center gap-2">
+            <span className="font-bold">{friendRequestNotification}</span> wants to be your friend!
+            <button
+              className="underline ml-1"
+              onClick={() => {
+                setBuddyListInitialTab('requests')
+                setShowBuddyList(true)
+                setFriendRequestNotification(null)
+              }}
+            >
+              View
+            </button>
+            <button className="underline" onClick={() => setFriendRequestNotification(null)}>
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -1148,6 +1218,17 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
           username={showProfile}
           isOwnProfile={showProfile === username}
           onClose={() => setShowProfile(null)}
+          onSendIM={(user) => openIM(user)}
+          onAddBuddy={(user) => {
+            // Send a friend request from the profile page
+            if (isSupabaseConfigured()) {
+              supabase.from('friend_requests').insert({
+                from_user: username,
+                to_user: user,
+                status: 'pending'
+              })
+            }
+          }}
         />
       )}
 
@@ -1167,6 +1248,7 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
           onOpenIM={openIM}
           onViewProfile={(user) => setShowProfile(user)}
           onClose={() => setShowBuddyList(false)}
+          initialTab={buddyListInitialTab}
         />
       )}
 

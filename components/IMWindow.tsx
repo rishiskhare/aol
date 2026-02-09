@@ -28,11 +28,61 @@ export function IMWindow({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [position] = useState(initialPosition)
 
+  // O(1) dedup: track all message IDs we've already rendered
+  const seenIdsRef = useRef<Set<string>>(new Set())
+  // Broadcast channel ref — send on the already-subscribed instance
+  const broadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  // Poll cursor — 30s lookback to absorb client/server clock skew
+  const lastPollTimeRef = useRef<string>(new Date(Date.now() - 30000).toISOString())
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
 
-  // Fetch existing messages
+  // Message handler — pure ID-based dedup via seenIdsRef
+  const addIncomingMessage = useCallback((newMsg: PrivateMessage) => {
+    const isForThis =
+      (newMsg.from_user === currentUser && newMsg.to_user === otherUser) ||
+      (newMsg.from_user === otherUser && newMsg.to_user === currentUser)
+    if (!isForThis) return
+    if (seenIdsRef.current.has(newMsg.id)) return
+
+    seenIdsRef.current.add(newMsg.id)
+    if (newMsg.from_user === otherUser) {
+      playIMReceived()
+    }
+    setMessages(prev => [...prev, newMsg])
+  }, [currentUser, otherUser])
+
+  // Poll for messages since last poll — catches anything realtime/broadcast misses
+  const pollMessages = useCallback(async () => {
+    if (!isSupabaseConfigured()) return
+    const since = lastPollTimeRef.current
+    const { data } = await supabase
+      .from('private_messages')
+      .select('*')
+      .or(`and(from_user.eq.${currentUser},to_user.eq.${otherUser}),and(from_user.eq.${otherUser},to_user.eq.${currentUser})`)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(100)
+
+    if (!data || data.length === 0) return
+
+    // Advance poll cursor to newest message (server timestamp)
+    lastPollTimeRef.current = data[data.length - 1].created_at
+
+    const newMsgs: PrivateMessage[] = []
+    for (const msg of data) {
+      if (seenIdsRef.current.has(msg.id)) continue
+      seenIdsRef.current.add(msg.id)
+      newMsgs.push(msg)
+    }
+    if (newMsgs.length > 0) {
+      setMessages(prev => [...prev, ...newMsgs])
+    }
+  }, [currentUser, otherUser])
+
+  // Fetch existing messages on mount
   useEffect(() => {
     const fetchMessages = async () => {
       if (!isSupabaseConfigured()) {
@@ -47,7 +97,12 @@ export function IMWindow({
         .order('created_at', { ascending: true })
         .limit(50)
 
-      if (data) {
+      if (data && data.length > 0) {
+        for (const msg of data) {
+          seenIdsRef.current.add(msg.id)
+        }
+        // Advance poll cursor past fetched messages
+        lastPollTimeRef.current = data[data.length - 1].created_at
         setMessages(data)
       }
       setIsLoading(false)
@@ -56,65 +111,57 @@ export function IMWindow({
     fetchMessages()
   }, [currentUser, otherUser])
 
-  // Subscribe to new messages
+  // Subscribe to real-time updates — mirrors ChatRoom pattern exactly
   useEffect(() => {
     if (!isSupabaseConfigured()) return
 
-    // Create a consistent channel name by sorting usernames
     const channelName = `im-${[currentUser, otherUser].sort().join('-')}`
 
+    // Poll immediately when channel becomes SUBSCRIBED — catches messages
+    // sent during the async connection window that broadcast/postgres_changes missed.
+    let hasPolledOnReady = false
+    const pollOnceWhenReady = () => {
+      if (!hasPolledOnReady) {
+        hasPolledOnReady = true
+        pollMessages()
+      }
+    }
+
+    // Broadcast channel for instant IM delivery (bypasses DB round-trip)
     const channel = supabase
       .channel(channelName)
+      .on('broadcast', { event: 'new-im' }, (payload) => {
+        addIncomingMessage(payload.payload as PrivateMessage)
+      })
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'private_messages'
-        },
+        { event: 'INSERT', schema: 'public', table: 'private_messages' },
         (payload) => {
-          const newMsg = payload.new as PrivateMessage
-          // Check if this message is part of this conversation
-          const isForThisConversation =
-            (newMsg.from_user === currentUser && newMsg.to_user === otherUser) ||
-            (newMsg.from_user === otherUser && newMsg.to_user === currentUser)
-
-          if (isForThisConversation) {
-            // Avoid duplicates from optimistic updates
-            setMessages((prev) => {
-              const isDuplicate = prev.some(
-                (msg) =>
-                  msg.id === newMsg.id ||
-                  (msg.id.startsWith('local-') &&
-                    msg.from_user === newMsg.from_user &&
-                    msg.content === newMsg.content &&
-                    Math.abs(new Date(msg.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000)
-              )
-              if (isDuplicate) {
-                // Replace local message with server message
-                return prev.map((msg) =>
-                  msg.id.startsWith('local-') &&
-                  msg.from_user === newMsg.from_user &&
-                  msg.content === newMsg.content
-                    ? newMsg
-                    : msg
-                )
-              }
-              // Play sound only for messages from the other user
-              if (newMsg.from_user === otherUser) {
-                playIMReceived()
-              }
-              return [...prev, newMsg]
-            })
-          }
+          addIncomingMessage(payload.new as PrivateMessage)
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') pollOnceWhenReady()
+      })
+
+    // Store ref so handleSend can broadcast on this already-subscribed instance
+    broadcastChannelRef.current = channel
+
+    // Safety net: if channel takes too long to connect, poll anyway after 2s
+    const safetyTimeout = setTimeout(() => pollOnceWhenReady(), 2000)
+
+    // Polling fallback — catches anything realtime/broadcast misses
+    const pollInterval = setInterval(() => {
+      pollMessages()
+    }, 3000)
 
     return () => {
+      clearTimeout(safetyTimeout)
+      clearInterval(pollInterval)
+      broadcastChannelRef.current = null
       supabase.removeChannel(channel)
     }
-  }, [currentUser, otherUser])
+  }, [currentUser, otherUser, addIncomingMessage, pollMessages])
 
   useEffect(() => {
     scrollToBottom()
@@ -127,20 +174,33 @@ export function IMWindow({
     const content = newMessage.trim()
     setNewMessage('')
 
-    // Optimistic update
-    const optimisticMsg: PrivateMessage = {
-      id: `local-${Date.now()}`,
+    // Client-generated UUID — same ID for optimistic update, broadcast, and DB insert
+    const msgId = crypto.randomUUID()
+    const msg: PrivateMessage = {
+      id: msgId,
       from_user: currentUser,
       to_user: otherUser,
       content,
       read: false,
       created_at: new Date().toISOString()
     }
-    setMessages((prev) => [...prev, optimisticMsg])
+
+    // Optimistic update first (non-blocking)
+    seenIdsRef.current.add(msgId)
+    setMessages(prev => [...prev, msg])
     playIMSent()
 
     if (isSupabaseConfigured()) {
+      // Broadcast on the already-subscribed channel instance for instant delivery
+      broadcastChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'new-im',
+        payload: msg,
+      })
+
+      // DB insert with client-generated UUID
       await supabase.from('private_messages').insert({
+        id: msgId,
         from_user: currentUser,
         to_user: otherUser,
         content
