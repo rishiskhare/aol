@@ -214,17 +214,9 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
         .order('joined_at', { ascending: true })
 
       if (usersData) {
-        // Filter to only active users (activity in last 60 seconds)
-        const activeUsers = usersData.filter((u: User) => {
-          if (u.last_activity) {
-            const lastActivity = new Date(u.last_activity).getTime()
-            return (Date.now() - lastActivity) < 60000
-          }
-          return true
-        })
-        setOnlineUsers(activeUsers)
+        setOnlineUsers(usersData)
         // Track users in the current room
-        const roomUsers = activeUsers.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
+        const roomUsers = usersData.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
         previousRoomUsersRef.current = new Set(roomUsers.map((u: User) => u.username))
       }
 
@@ -290,18 +282,10 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
             .order('joined_at', { ascending: true })
 
           if (data) {
-            // Filter to only active users (activity in last 60 seconds)
-            const activeUsers = data.filter((u: User) => {
-              if (u.last_activity) {
-                const lastActivity = new Date(u.last_activity).getTime()
-                return (Date.now() - lastActivity) < 60000
-              }
-              return true
-            })
-            setOnlineUsers(activeUsers)
+            setOnlineUsers(data)
 
             // Filter to users in current room
-            const roomUsers = activeUsers.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
+            const roomUsers = data.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
             const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
             const oldRoomUsernames = previousRoomUsersRef.current
 
@@ -341,7 +325,27 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
       )
       .subscribe()
 
+    // Polling fallback: refetch online users periodically in case realtime events are missed
+    const pollInterval = setInterval(async () => {
+      const { data } = await supabase
+        .from('online_users')
+        .select('*')
+        .order('joined_at', { ascending: true })
+
+      if (data) {
+        setOnlineUsers(data)
+
+        const roomUsers = data.filter((u: User) => (u.current_room || 'Town Square') === currentRoom)
+        const newRoomUsernames = new Set(roomUsers.map((u: User) => u.username))
+        previousRoomUsersRef.current = newRoomUsernames
+
+        const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
+        setTypingUsers(typing)
+      }
+    }, 10000)
+
     return () => {
+      clearInterval(pollInterval)
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
     }
@@ -378,13 +382,21 @@ export function ChatRoom({ username, onSignOut }: ChatRoomProps) {
 
     // Cleanup: remove user when leaving
     const handleBeforeUnload = () => {
-      // Use sendBeacon for reliable cleanup (doesn't wait for response)
+      // Use fetch with keepalive for reliable cleanup on page unload
+      // (sendBeacon only supports POST, but Supabase REST API needs DELETE)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
       const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLIC_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
       if (supabaseUrl && supabaseKey) {
-        navigator.sendBeacon(
+        fetch(
           `${supabaseUrl}/rest/v1/online_users?username=eq.${encodeURIComponent(username)}`,
-          JSON.stringify({})
+          {
+            method: 'DELETE',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+            },
+            keepalive: true,
+          }
         )
       }
     }

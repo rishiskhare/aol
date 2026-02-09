@@ -120,8 +120,8 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
             if (isDuplicate) {
               return prev.map((msg) =>
                 msg.id.startsWith('local-') &&
-                msg.username === newMsg.username &&
-                msg.content === newMsg.content
+                  msg.username === newMsg.username &&
+                  msg.content === newMsg.content
                   ? newMsg
                   : msg
               )
@@ -184,7 +184,23 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
       )
       .subscribe()
 
+    // Polling fallback: refetch online users periodically in case realtime events are missed
+    const pollInterval = setInterval(async () => {
+      const { data } = await supabase
+        .from('online_users')
+        .select('*')
+        .order('joined_at', { ascending: true })
+
+      if (data) {
+        setOnlineUsers(data)
+
+        const typing = data.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
+        setTypingUsers(typing)
+      }
+    }, 10000)
+
     return () => {
+      clearInterval(pollInterval)
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
     }
