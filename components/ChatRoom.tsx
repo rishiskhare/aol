@@ -113,6 +113,7 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
   const [userWarnings, setUserWarnings] = useState<UserWarning[]>([])
   const [roomCache, setRoomCache] = useState<Record<string, Room>>({})
   const [inviteCopied, setInviteCopied] = useState(false)
+  const [showInviteDialog, setShowInviteDialog] = useState<{ inviteCode: string; roomName: string } | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -681,6 +682,17 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
     setTimeout(() => setInviteCopied(false), 2000)
   }
 
+  const handleCopyInviteLink = (inviteCode: string) => {
+    const url = `${window.location.origin}/invite/${inviteCode}`
+    navigator.clipboard.writeText(url)
+    setInviteCopied(true)
+    setTimeout(() => setInviteCopied(false), 2000)
+  }
+
+  const handlePrivateRoomCreated = (inviteCode: string, roomName: string) => {
+    setShowInviteDialog({ inviteCode, roomName })
+  }
+
   // Filter users to current room only, and only show active users (activity in last 60 seconds)
   const usersInRoom = onlineUsers.filter(u => {
     const inRoom = (u.current_room || 'Town Square') === currentRoom
@@ -1088,6 +1100,7 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
           username={username}
           currentRoom={currentRoom}
           onJoinRoom={handleJoinRoom}
+          onPrivateRoomCreated={handlePrivateRoomCreated}
           onClose={() => setShowRoomList(false)}
         />
       )}
@@ -1103,6 +1116,34 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
           onUnblock={() => unblockUser(showWarnBlock)}
           onClose={() => setShowWarnBlock(null)}
         />
+      )}
+
+      {/* Invite Link Dialog (owned by ChatRoom so it survives RoomListWindow closing) */}
+      {showInviteDialog && (
+        <div className="fixed inset-0 flex items-center justify-center z-[70] bg-black/30">
+          <AOLWindow title="Invite Link" width="350px" onClose={() => setShowInviteDialog(null)}>
+            <div className="p-3 space-y-3">
+              <p className="text-xs">
+                Your private room <strong>&quot;{showInviteDialog.roomName}&quot;</strong> has been created!
+              </p>
+              <p className="text-xs">Share this link to invite friends:</p>
+              <div className="win95-input p-2 text-xs break-all select-all bg-white">
+                {`${window.location.origin}/invite/${showInviteDialog.inviteCode}`}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  className="win95-btn"
+                  onClick={() => handleCopyInviteLink(showInviteDialog.inviteCode)}
+                >
+                  {inviteCopied ? 'Copied!' : 'Copy Link'}
+                </button>
+                <button className="win95-btn" onClick={() => setShowInviteDialog(null)}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </AOLWindow>
+        </div>
       )}
     </div>
   )

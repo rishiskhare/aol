@@ -20,6 +20,7 @@ interface RoomListWindowProps {
   username: string
   currentRoom: string
   onJoinRoom: (roomName: string, roomData?: Room) => void
+  onPrivateRoomCreated: (inviteCode: string, roomName: string) => void
   onClose: () => void
 }
 
@@ -47,7 +48,7 @@ function generateInviteCode(): string {
   return code
 }
 
-export function RoomListWindow({ username, currentRoom, onJoinRoom, onClose }: RoomListWindowProps) {
+export function RoomListWindow({ username, currentRoom, onJoinRoom, onPrivateRoomCreated, onClose }: RoomListWindowProps) {
   const [rooms, setRooms] = useState<PublicRoom[]>(DEFAULT_ROOMS)
   const [privateRooms, setPrivateRooms] = useState<PrivateRoomEntry[]>([])
   const [selectedCategory, setSelectedCategory] = useState('All')
@@ -55,8 +56,6 @@ export function RoomListWindow({ username, currentRoom, onJoinRoom, onClose }: R
   const [showCreateRoom, setShowCreateRoom] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [isPrivateRoom, setIsPrivateRoom] = useState(false)
-  const [showInviteDialog, setShowInviteDialog] = useState<{ inviteCode: string; roomName: string } | null>(null)
-  const [inviteCopied, setInviteCopied] = useState(false)
 
   // Fetch room user counts and private rooms
   useEffect(() => {
@@ -172,11 +171,11 @@ export function RoomListWindow({ username, currentRoom, onJoinRoom, onClose }: R
       setIsPrivateRoom(false)
       setShowCreateRoom(false)
 
-      // Show invite dialog
-      setShowInviteDialog({ inviteCode, roomName: name })
-
-      // Join the room
+      // Join the room first (this will close RoomListWindow)
       onJoinRoom(`room:${room.id}`, room)
+
+      // Then signal to parent to show invite dialog (parent owns this UI)
+      onPrivateRoomCreated(inviteCode, name)
     } else {
       // Public room (existing behavior)
       if (rooms.some(r => r.name.toLowerCase() === name.toLowerCase())) return
@@ -191,13 +190,6 @@ export function RoomListWindow({ username, currentRoom, onJoinRoom, onClose }: R
       setShowCreateRoom(false)
       onJoinRoom(name)
     }
-  }
-
-  const handleCopyInvite = (inviteCode: string) => {
-    const url = `${window.location.origin}/invite/${inviteCode}`
-    navigator.clipboard.writeText(url)
-    setInviteCopied(true)
-    setTimeout(() => setInviteCopied(false), 2000)
   }
 
   return (
@@ -369,33 +361,6 @@ export function RoomListWindow({ username, currentRoom, onJoinRoom, onClose }: R
         </div>
       )}
 
-      {/* Invite Link Dialog */}
-      {showInviteDialog && (
-        <div className="fixed inset-0 flex items-center justify-center z-[70] bg-black/30">
-          <AOLWindow title="Invite Link" width="350px" onClose={() => setShowInviteDialog(null)}>
-            <div className="p-3 space-y-3">
-              <p className="text-xs">
-                Your private room <strong>&quot;{showInviteDialog.roomName}&quot;</strong> has been created!
-              </p>
-              <p className="text-xs">Share this link to invite friends:</p>
-              <div className="win95-input p-2 text-xs break-all select-all bg-white">
-                {typeof window !== 'undefined' ? `${window.location.origin}/invite/${showInviteDialog.inviteCode}` : ''}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  className="win95-btn"
-                  onClick={() => handleCopyInvite(showInviteDialog.inviteCode)}
-                >
-                  {inviteCopied ? 'Copied!' : 'Copy Link'}
-                </button>
-                <button className="win95-btn" onClick={() => setShowInviteDialog(null)}>
-                  OK
-                </button>
-              </div>
-            </div>
-          </AOLWindow>
-        </div>
-      )}
     </div>
   )
 }
