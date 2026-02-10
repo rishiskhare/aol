@@ -124,6 +124,7 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const remoteTypingTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
   const previousRoomUsersRef = useRef<Set<string>>(new Set())
   const joinTimeRef = useRef<string>(new Date().toISOString())
   const broadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -410,6 +411,21 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         const msg = payload.payload as Message
         addIncomingMessage(msg)
       })
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const { username: typingUser, room } = payload.payload as { username: string; room: string }
+        if (typingUser === username || room !== currentRoomRef.current) return
+
+        // Add to typing set
+        setTypingUsers(prev => prev.includes(typingUser) ? prev : [...prev, typingUser])
+
+        // Clear any existing timeout for this user and set a new 3s timeout
+        const existing = remoteTypingTimeoutsRef.current.get(typingUser)
+        if (existing) clearTimeout(existing)
+        remoteTypingTimeoutsRef.current.set(typingUser, setTimeout(() => {
+          setTypingUsers(prev => prev.filter(u => u !== typingUser))
+          remoteTypingTimeoutsRef.current.delete(typingUser)
+        }, 3000))
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') pollOnceWhenReady()
       })
@@ -463,9 +479,6 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
       }
 
       previousRoomUsersRef.current = newRoomUsernames
-
-      const typing = roomUsers.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
-      setTypingUsers(typing)
     }
 
     const fetchAndProcessUsers = async () => {
@@ -500,6 +513,9 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
       clearTimeout(safetyTimeout)
       clearInterval(userPollInterval)
       clearInterval(msgPollInterval)
+      // Clear all remote typing timeouts
+      remoteTypingTimeoutsRef.current.forEach(t => clearTimeout(t))
+      remoteTypingTimeoutsRef.current.clear()
       broadcastChannelRef.current = null
       supabase.removeChannel(broadcastChannel)
       supabase.removeChannel(messagesChannel)
@@ -572,24 +588,23 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
     scrollToBottom()
   }, [messages, systemEvents, scrollToBottom])
 
-  // Handle typing indicator
-  const handleTyping = useCallback(async () => {
+  // Handle typing indicator — broadcast-based for instant delivery
+  const handleTyping = useCallback(() => {
     if (!isSupabaseConfigured() || isDemoMode) return
+    if (!broadcastChannelRef.current) return
 
-    await supabase
-      .from('online_users')
-      .update({ is_typing: true })
-      .eq('username', username)
+    // Throttle: only send a broadcast every 2 seconds
+    if (typingTimeoutRef.current) return
 
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current)
-    }
+    broadcastChannelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { username, room: currentRoomRef.current }
+    })
 
-    typingTimeoutRef.current = setTimeout(async () => {
-      await supabase
-        .from('online_users')
-        .update({ is_typing: false })
-        .eq('username', username)
+    // Set a cooldown so we don't spam broadcasts on every keystroke
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null
     }, 2000)
   }, [username, isDemoMode])
 
@@ -609,9 +624,10 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
 
     setNewMessage('')
 
-    // Clear typing timeout locally (non-blocking)
+    // Clear typing throttle so next typing event sends immediately
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
+      typingTimeoutRef.current = null
     }
 
     // Generate a real UUID client-side. This same ID is used in the optimistic update,

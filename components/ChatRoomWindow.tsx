@@ -52,6 +52,8 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
   const inputRef = useRef<HTMLInputElement>(null)
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previousUsersRef = useRef<Set<string>>(new Set())
+  const broadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const remoteTypingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -99,6 +101,26 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
   // Subscribe to real-time updates
   useEffect(() => {
     if (!isSupabaseConfigured()) return
+
+    // Broadcast channel for instant typing indicators
+    const broadcastChannel = supabase
+      .channel('chat-broadcast-window')
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const { username: typingUser } = payload.payload as { username: string; room?: string }
+        if (typingUser === username) return
+
+        setTypingUsers(prev => prev.includes(typingUser) ? prev : [...prev, typingUser])
+
+        const existing = remoteTypingTimeoutsRef.current.get(typingUser)
+        if (existing) clearTimeout(existing)
+        remoteTypingTimeoutsRef.current.set(typingUser, setTimeout(() => {
+          setTypingUsers(prev => prev.filter(u => u !== typingUser))
+          remoteTypingTimeoutsRef.current.delete(typingUser)
+        }, 3000))
+      })
+      .subscribe()
+
+    broadcastChannelRef.current = broadcastChannel
 
     const messagesChannel = supabase
       .channel('chat-messages')
@@ -176,9 +198,6 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
 
             previousUsersRef.current = newUsernames
             setOnlineUsers(data)
-
-            const typing = data.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
-            setTypingUsers(typing)
           }
         }
       )
@@ -193,14 +212,15 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
 
       if (data) {
         setOnlineUsers(data)
-
-        const typing = data.filter((u: User) => u.is_typing && u.username !== username).map((u: User) => u.username)
-        setTypingUsers(typing)
       }
     }, 10000)
 
     return () => {
       clearInterval(pollInterval)
+      remoteTypingTimeoutsRef.current.forEach(t => clearTimeout(t))
+      remoteTypingTimeoutsRef.current.clear()
+      broadcastChannelRef.current = null
+      supabase.removeChannel(broadcastChannel)
       supabase.removeChannel(messagesChannel)
       supabase.removeChannel(usersChannel)
     }
@@ -210,23 +230,21 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
     scrollToBottom()
   }, [messages, systemEvents, scrollToBottom])
 
-  const handleTyping = useCallback(async () => {
+  const handleTyping = useCallback(() => {
     if (!isSupabaseConfigured() || isDemoMode) return
+    if (!broadcastChannelRef.current) return
 
-    await supabase
-      .from('online_users')
-      .update({ is_typing: true })
-      .eq('username', username)
+    // Throttle: only send a broadcast every 2 seconds
+    if (typingTimeoutRef.current) return
 
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current)
-    }
+    broadcastChannelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { username }
+    })
 
-    typingTimeoutRef.current = setTimeout(async () => {
-      await supabase
-        .from('online_users')
-        .update({ is_typing: false })
-        .eq('username', username)
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null
     }, 2000)
   }, [username, isDemoMode])
 
@@ -245,12 +263,7 @@ export function ChatRoomWindow({ windowId, onOpenIM, onViewProfile }: ChatRoomWi
 
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
-    }
-    if (isSupabaseConfigured()) {
-      await supabase
-        .from('online_users')
-        .update({ is_typing: false })
-        .eq('username', username)
+      typingTimeoutRef.current = null
     }
 
     const newMsg: Message = {
