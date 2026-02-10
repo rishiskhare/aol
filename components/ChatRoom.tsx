@@ -1228,26 +1228,6 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
         )
       })}
 
-      {/* Profile Window */}
-      {showProfile && (
-        <ProfileWindow
-          username={showProfile}
-          isOwnProfile={showProfile === username}
-          onClose={() => setShowProfile(null)}
-          onSendIM={(user) => openIM(user)}
-          onAddBuddy={(user) => {
-            // Send a friend request from the profile page
-            if (isSupabaseConfigured()) {
-              supabase.from('friend_requests').insert({
-                from_user: username,
-                to_user: user,
-                status: 'pending'
-              })
-            }
-          }}
-        />
-      )}
-
       {/* Away Message Dialog */}
       {showAwayDialog && (
         <AwayMessageDialog
@@ -1265,6 +1245,26 @@ export function ChatRoom({ username, onSignOut, pendingInvite }: ChatRoomProps) 
           onViewProfile={(user) => setShowProfile(user)}
           onClose={() => setShowBuddyList(false)}
           initialTab={buddyListInitialTab}
+        />
+      )}
+
+      {/* Profile Window — rendered after BuddyList so it appears on top */}
+      {showProfile && (
+        <ProfileWindow
+          username={showProfile}
+          isOwnProfile={showProfile === username}
+          onClose={() => setShowProfile(null)}
+          onSendIM={(user) => openIM(user)}
+          onAddBuddy={(user) => {
+            // Send a friend request from the profile page
+            if (isSupabaseConfigured()) {
+              supabase.from('friend_requests').insert({
+                from_user: username,
+                to_user: user,
+                status: 'pending'
+              })
+            }
+          }}
         />
       )}
 

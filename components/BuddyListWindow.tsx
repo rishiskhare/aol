@@ -267,7 +267,7 @@ export function BuddyListWindow({ currentUser, onOpenIM, onViewProfile, onClose,
                             selectedBuddy === friend ? 'bg-[#000080] text-white' : 'hover:bg-blue-100'
                           } ${!isOnline ? 'text-gray-400' : ''}`}
                           onClick={() => setSelectedBuddy(friend)}
-                          onDoubleClick={() => isOnline && onOpenIM(friend)}
+                          onDoubleClick={() => onOpenIM(friend)}
                         >
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
                           <span className="truncate">{friend}</span>
@@ -359,8 +359,8 @@ export function BuddyListWindow({ currentUser, onOpenIM, onViewProfile, onClose,
           <div className="p-1 flex gap-1">
             <button
               className="win95-btn text-xs flex-1"
-              onClick={() => selectedBuddy && onlineUsers.has(selectedBuddy) && onOpenIM(selectedBuddy)}
-              disabled={!selectedBuddy || !onlineUsers.has(selectedBuddy || '')}
+              onClick={() => selectedBuddy && onOpenIM(selectedBuddy)}
+              disabled={!selectedBuddy}
             >
               IM
             </button>
