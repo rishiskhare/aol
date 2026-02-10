@@ -41,8 +41,34 @@ export const emoticons: Emoticon[] = [
   { shortcut: ':star:', alt: [], emoji: '⭐', description: 'Star' },
 ]
 
-// Convert emoticon shortcuts in text to emojis
+// URL pattern to protect URLs from emoticon replacement
+const URL_PATTERN = /(https?:\/\/[^\s<>\[\]]+|www\.[^\s<>\[\]]+)/gi
+
+// Convert emoticon shortcuts in text to emojis, preserving URLs
 export function parseEmoticons(text: string): string {
+  // Split text into URL and non-URL segments so emoticons are only
+  // replaced in the non-URL parts (e.g. :/ in https:// stays intact)
+  const parts: string[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  URL_PATTERN.lastIndex = 0
+  while ((match = URL_PATTERN.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(replaceEmoticons(text.slice(lastIndex, match.index)))
+    }
+    parts.push(match[0]) // URL kept as-is
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    parts.push(replaceEmoticons(text.slice(lastIndex)))
+  }
+
+  return parts.join('')
+}
+
+// Replace emoticon shortcuts with emoji in a text fragment
+function replaceEmoticons(text: string): string {
   let result = text
 
   for (const emoticon of emoticons) {
